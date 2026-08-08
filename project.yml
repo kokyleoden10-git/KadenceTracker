@@ -1,0 +1,26 @@
+name: Kadence
+options:
+  bundleIdPrefix: com.kyleoden
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  Kadence:
+    type: application
+    platform: iOS
+    sources:
+      - Kadence
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kyleoden.kadence
+        PRODUCT_NAME: Kadence
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Kadence
+        TARGETED_DEVICE_FAMILY: "1"
+    dependencies:
+      - package: Supabase
+packages:
+  Supabase:
+    url: https://github.com/supabase/supabase-swift
+    from: "2.0.0"

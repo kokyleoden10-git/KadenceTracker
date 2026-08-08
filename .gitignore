@@ -1,0 +1,11 @@
+# Xcode / xcodegen — project is regenerated from project.yml via `xcodegen generate`
+*.xcodeproj/
+xcuserdata/
+DerivedData/
+.build/
+.swiftpm/
+
+# Local secrets — copy Secrets.example.plist to Secrets.plist and fill in
+Kadence/Config/Secrets.plist
+
+.DS_Store
