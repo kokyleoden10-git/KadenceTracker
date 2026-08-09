@@ -27,17 +27,20 @@ struct HomeView: View {
                 }
                 .padding()
             }
+            .refreshable { await load() }
         }
-        .task {
-            do {
-                async let profileTask = ProfileService.fetchCurrent()
-                async let habitsTask = SupabaseService.shared.fetchHabits()
-                profile = try await profileTask
-                habits = try await habitsTask
-                status = habits.isEmpty ? "No habits yet." : "\(habits.count) habit(s)."
-            } catch {
-                status = "Couldn't load data: \(error.localizedDescription)"
-            }
+        .task { await load() }
+    }
+
+    private func load() async {
+        do {
+            async let profileTask = ProfileService.fetchCurrent()
+            async let habitsTask = SupabaseService.shared.fetchHabits()
+            profile = try await profileTask
+            habits = try await habitsTask
+            status = habits.isEmpty ? "No habits yet." : "\(habits.count) habit(s)."
+        } catch {
+            status = "Couldn't load data: \(error.localizedDescription)"
         }
     }
 }

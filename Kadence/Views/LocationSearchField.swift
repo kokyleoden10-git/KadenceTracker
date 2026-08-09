@@ -8,27 +8,45 @@ import SwiftUI
 struct LocationSearchField: View {
     let label: String
     @Binding var text: String
+    var infoText: String? = nil
 
     @StateObject private var completer = LocationCompleter()
     @FocusState private var isFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(KadenceTheme.bodyFont(12))
-                .foregroundStyle(KadenceTheme.textMuted)
-
-            TextField(label, text: $text)
-                .focused($isFocused)
-                .textInputAutocapitalization(.words)
-                .autocorrectionDisabled()
-                .padding(10)
-                .background(KadenceTheme.surface)
-                .foregroundStyle(KadenceTheme.textPrimary)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .onChange(of: text) { _, newValue in
-                    completer.update(query: newValue)
+            HStack(spacing: 4) {
+                Text(label)
+                    .font(KadenceTheme.bodyFont(12))
+                    .foregroundStyle(KadenceTheme.textMuted)
+                if let infoText {
+                    InfoButton(text: infoText)
                 }
+            }
+
+            HStack(spacing: 8) {
+                TextField(label, text: $text)
+                    .focused($isFocused)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
+
+                if !text.isEmpty {
+                    Button {
+                        text = ""
+                        completer.results = []
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(KadenceTheme.textMuted)
+                    }
+                }
+            }
+            .padding(10)
+            .background(KadenceTheme.surface)
+            .foregroundStyle(KadenceTheme.textPrimary)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .onChange(of: text) { _, newValue in
+                completer.update(query: newValue)
+            }
 
             if isFocused, !completer.results.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {

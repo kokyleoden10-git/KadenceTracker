@@ -1,22 +1,23 @@
 import SwiftUI
 
-/// Spec §7a. Birthdate/birth time use DatePicker (there's no "unset" state
-/// once touched — they default to Jan 1 2000 / noon rather than gating
-/// behind an extra toggle, matching the app's "sensible defaults over
-/// exhaustive config" philosophy). Locations use MapKit autocomplete but
-/// stay freeform text underneath — picking a suggestion just fills the
-/// field, it doesn't lock you out of typing something else.
+/// Spec §7a. Birthdate always has a concrete value (DatePicker can't
+/// represent "unset" without extra state) — birth time gets that extra
+/// state since it's explicitly removable per product feedback, birthdate
+/// isn't. Locations use MapKit autocomplete but stay freeform text
+/// underneath — picking a suggestion just fills the field.
 struct SettingsView: View {
     @State private var profile: Profile?
     @State private var email: String = ""
 
     @State private var nickname = ""
     @State private var birthdateDate = Calendar.current.date(from: DateComponents(year: 2000, month: 1, day: 1)) ?? Date()
+    @State private var hasBirthTime = false
     @State private var birthTimeDate = Calendar.current.date(from: DateComponents(hour: 12, minute: 0)) ?? Date()
     @State private var birthLocation = ""
     @State private var currentLocation = ""
 
     @State private var isSaving = false
+    @State private var showSavedConfirmation = false
     @State private var statusMessage: String?
 
     @State private var includeSensitiveInExport = false
@@ -48,19 +49,31 @@ struct SettingsView: View {
             labeledField("Email", text: .constant(email), disabled: true)
             labeledField("Nickname", text: $nickname)
             labeledDateField("Birthdate", selection: $birthdateDate, components: .date)
-            labeledDateField("Birth time", selection: $birthTimeDate, components: .hourAndMinute)
-            LocationSearchField(label: "Birth location", text: $birthLocation)
-            LocationSearchField(label: "Current location", text: $currentLocation)
+            birthTimeField
+            LocationSearchField(
+                label: "Birth location",
+                text: $birthLocation,
+                infoText: "Used along with your birthdate and birth time to calculate your ascendant (rising) sign."
+            )
+            LocationSearchField(
+                label: "Current location",
+                text: $currentLocation,
+                infoText: "Used to show your local weather on the Today screen, via Open-Meteo."
+            )
 
             Button(action: save) {
-                if isSaving {
-                    ProgressView()
-                } else {
-                    Text("Save")
+                Group {
+                    if isSaving {
+                        ProgressView()
+                    } else if showSavedConfirmation {
+                        Label("Saved", systemImage: "checkmark.circle.fill")
+                    } else {
+                        Text("Save")
+                    }
                 }
+                .frame(maxWidth: .infinity, minHeight: 40)
             }
-            .frame(maxWidth: .infinity, minHeight: 40)
-            .background(KadenceTheme.piscesTeal)
+            .background(showSavedConfirmation ? KadenceTheme.piscesSeafoam : KadenceTheme.piscesTeal)
             .foregroundStyle(KadenceTheme.bg)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .disabled(isSaving)
@@ -68,7 +81,50 @@ struct SettingsView: View {
             if let statusMessage {
                 Text(statusMessage)
                     .font(KadenceTheme.bodyFont(12))
+                    .foregroundStyle(KadenceTheme.ariesEmber)
+            }
+        }
+    }
+
+    private var birthTimeField: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Text("Birth time")
+                    .font(KadenceTheme.bodyFont(12))
                     .foregroundStyle(KadenceTheme.textMuted)
+                InfoButton(text: "Used along with your birthdate and birth location to calculate your ascendant (rising) sign.")
+            }
+
+            if hasBirthTime {
+                HStack {
+                    DatePicker("Birth time", selection: $birthTimeDate, displayedComponents: .hourAndMinute)
+                        .labelsHidden()
+                        .datePickerStyle(.compact)
+                        .tint(KadenceTheme.piscesTeal)
+                        .environment(\.colorScheme, .dark)
+                    Spacer()
+                    Button {
+                        hasBirthTime = false
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(KadenceTheme.textMuted)
+                    }
+                }
+                .padding(10)
+                .background(KadenceTheme.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                Button {
+                    hasBirthTime = true
+                } label: {
+                    Text("Add birth time")
+                        .font(KadenceTheme.bodyFont(14))
+                        .foregroundStyle(KadenceTheme.piscesTeal)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(10)
+                .background(KadenceTheme.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             }
         }
     }
@@ -177,6 +233,9 @@ struct SettingsView: View {
         }
     }
 
+    /// `disabled` fields (just Email today) are styled flatter and dimmer
+    /// so it's visually obvious they're not editable, not just functionally
+    /// blocked.
     private func labeledField(_ label: String, text: Binding<String>, disabled: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
@@ -187,9 +246,14 @@ struct SettingsView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .padding(10)
-                .background(KadenceTheme.surface)
-                .foregroundStyle(disabled ? KadenceTheme.textMuted : KadenceTheme.textPrimary)
+                .background(disabled ? KadenceTheme.bg : KadenceTheme.surface)
+                .foregroundStyle(KadenceTheme.textMuted)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(KadenceTheme.textMuted.opacity(disabled ? 0.15 : 0), lineWidth: 1)
+                )
+                .opacity(disabled ? 0.7 : 1)
         }
     }
 
@@ -211,6 +275,7 @@ struct SettingsView: View {
         timeFormatter.dateFormat = "HH:mm:ss"
         if let birthTime = loaded.birthTime, let parsed = timeFormatter.date(from: birthTime) {
             birthTimeDate = parsed
+            hasBirthTime = true
         }
     }
 
@@ -230,11 +295,15 @@ struct SettingsView: View {
                 currentLocation: currentLocation.isEmpty ? nil : currentLocation,
                 birthLocation: birthLocation.isEmpty ? nil : birthLocation,
                 birthdate: dateFormatter.string(from: birthdateDate),
-                birthTime: timeFormatter.string(from: birthTimeDate)
+                birthTime: hasBirthTime ? timeFormatter.string(from: birthTimeDate) : nil
             )
             do {
                 try await ProfileService.update(userId, with: values)
-                statusMessage = "Saved."
+                showSavedConfirmation = true
+                Task {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    showSavedConfirmation = false
+                }
             } catch {
                 statusMessage = "Couldn't save: \(error.localizedDescription)"
             }

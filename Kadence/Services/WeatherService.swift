@@ -42,11 +42,25 @@ enum WeatherService {
         }
 
         return WeatherBlip(
-            locationLabel: location,
+            locationLabel: shortLabel(from: location),
             highF: Int(high.rounded()),
             lowF: Int(low.rounded()),
             condition: conditionText(for: code)
         )
+    }
+
+    /// Autocomplete (and Open-Meteo's own geocoder) tends to return
+    /// verbose strings like "Brooklyn, New York, NY, United States" — this
+    /// reduces that to "Brooklyn, NY" for display by taking the first
+    /// segment plus whichever comma-separated segment looks like a US
+    /// state abbreviation (exactly two uppercase letters).
+    private static func shortLabel(from raw: String) -> String {
+        let parts = raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        guard let city = parts.first else { return raw }
+        if let stateAbbreviation = parts.dropFirst().first(where: { $0.count == 2 && $0 == $0.uppercased() }) {
+            return "\(city), \(stateAbbreviation)"
+        }
+        return city
     }
 
     private static func geocode(_ location: String) async throws -> (lat: Double, lon: Double)? {

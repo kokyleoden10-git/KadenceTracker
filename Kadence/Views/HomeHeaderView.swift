@@ -41,7 +41,7 @@ struct HomeHeaderView: View {
                 .foregroundStyle(KadenceTheme.textPrimary)
 
             if let weather {
-                Text("\(weather.locationLabel.uppercased())  |  HIGH \(weather.highF)\u{00B0} \u{00B7} LOW \(weather.lowF)\u{00B0} \u{00B7} \(weather.condition.uppercased())  \u{00B7}  via \(WeatherService.provider)")
+                Text("\(weather.locationLabel.uppercased())  |  HIGH \(weather.highF)\u{00B0} \u{00B7} LOW \(weather.lowF)\u{00B0} \u{00B7} \(weather.condition.uppercased())")
                     .font(KadenceTheme.bodyFont(11))
                     .tracking(0.8)
                     .foregroundStyle(KadenceTheme.textMuted)
