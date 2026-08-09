@@ -13,33 +13,40 @@ extension Color {
     }
 }
 
-/// Carried over from the v1 web app's palette (see docs/ for the old repo notes).
-/// v1 didn't bundle the DM Serif Display / Inter font files, so this uses system
-/// fonts for now — drop the .ttf files into the project and swap Font.custom in
-/// here if you want the exact v1 typography.
+/// Astrology-derived palette (spec §10). Domain and font choices are all
+/// driven from here so there's one place to retune the theme.
+///
+/// Fonts reference DM Serif Display + Inter by PostScript name. The actual
+/// .ttf files aren't bundled yet — drop them into Kadence/Resources/Fonts/
+/// (filenames must match project.yml's UIAppFonts list) or Font.custom
+/// silently falls back to the system font.
 enum KadenceTheme {
-    static let background = Color(hex: "0F1117")
-    static let text = Color(hex: "F0EDE6")
+    static let bg = Color(hex: "12181A")
+    static let surface = Color(hex: "1B2427")
+    static let textPrimary = Color(hex: "EDE7DD")
+    static let textMuted = Color(hex: "8FA39E")
 
-    static let sage = Color(hex: "7DB5A0")    // Wellbeing
-    static let amber = Color(hex: "C8964E")   // Knowledge
-    static let pink = Color(hex: "C47BA0")    // Creativity
-    static let purple = Color(hex: "8B77B8")  // Systems
+    static let piscesTeal = Color(hex: "3E8E85")        // primary accent, Wellbeing
+    static let piscesSeafoam = Color(hex: "7FBFB0")     // hover/secondary states, tag chips
+    static let aquariusIce = Color(hex: "5FA8D3")       // nav/chrome, Knowledge
+    static let capricornBronze = Color(hex: "B08355")   // Systems
+    static let sagittariusIndigo = Color(hex: "6B5B95") // Creativity, Reflection accent
+    static let ariesEmber = Color(hex: "C0604A")        // streak indicator only
 
     static func color(for domain: Domain) -> Color {
         switch domain {
-        case .wellbeing: return sage
-        case .knowledge: return amber
-        case .creativity: return pink
-        case .systems: return purple
+        case .wellbeing: return piscesTeal
+        case .knowledge: return aquariusIce
+        case .creativity: return sagittariusIndigo
+        case .systems: return capricornBronze
         }
     }
 
     static func displayFont(_ size: CGFloat) -> Font {
-        .system(size: size, weight: .semibold, design: .serif)
+        .custom("DMSerifDisplay-Regular", size: size)
     }
 
     static func bodyFont(_ size: CGFloat = 16) -> Font {
-        .system(size: size, weight: .regular, design: .default)
+        .custom("Inter-Regular", size: size)
     }
 }

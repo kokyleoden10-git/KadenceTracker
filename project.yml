@@ -9,14 +9,24 @@ targets:
     platform: iOS
     sources:
       - Kadence
+    info:
+      path: Kadence/Info.plist
+      properties:
+        CFBundleDisplayName: Kadence
+        UILaunchScreen: {}
+        UIAppFonts:
+          - DMSerifDisplay-Regular.ttf
+          - Inter-Regular.ttf
+    entitlements:
+      path: Kadence/Kadence.entitlements
+      properties:
+        com.apple.developer.applesignin:
+          - Default
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.kyleoden.kadence
         PRODUCT_NAME: Kadence
         SWIFT_VERSION: "5.0"
-        GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_CFBundleDisplayName: Kadence
         TARGETED_DEVICE_FAMILY: "1"
     dependencies:
       - package: Supabase

@@ -1,33 +1,13 @@
 # Kadence v2
 
-Personal habit tracker. iOS app (SwiftUI) + Supabase (Postgres) backend, so
-data is reachable from the iPhone app or any browser via the Supabase
-dashboard. See [`docs/kadence-guide.md`](docs/kadence-guide.md) for the "why"
+Personal habit tracker. iOS app (SwiftUI) + Supabase (Postgres + Auth)
+backend. See [`docs/kadence-guide.md`](docs/kadence-guide.md) for the "why"
 and [`docs/kadence-spec.md`](docs/kadence-spec.md) for the full technical
 spec — this README only covers getting the project running.
 
-## One-time setup
+## Regenerating the Xcode project
 
-**1. Install Xcode** (App Store) — the Command Line Tools alone aren't
-enough to build/run this.
-
-**2. Fix Homebrew, if needed.** This Mac's Homebrew was installed at the
-Intel path (`/usr/local`) instead of the Apple Silicon path (`/opt/homebrew`)
-and is missing its own git data — reinstall it fresh:
-
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
-
-**3. Install XcodeGen and the GitHub CLI:**
-
-```bash
-brew install xcodegen gh
-gh auth login
-```
-
-**4. Generate the Xcode project** (the `.xcodeproj` isn't committed —
-`project.yml` is the source of truth):
+The `.xcodeproj` isn't committed — `project.yml` is the source of truth:
 
 ```bash
 cd ~/Developer/kadence-v2
@@ -35,48 +15,149 @@ xcodegen generate
 open Kadence.xcodeproj
 ```
 
-**5. Add your Supabase credentials:**
+Verified with a clean `xcodebuild` simulator build against Supabase Swift
+2.54.1 (resolved from `project.yml`'s `from: "2.0.0"` constraint) — builds
+clean, no errors.
 
-```bash
-cp Kadence/Config/Secrets.example.plist Kadence/Config/Secrets.plist
-```
+## What changed in this pass: auth, palette, home header
 
-Fill in `SUPABASE_URL` and `SUPABASE_ANON_KEY` from your Supabase project's
-**Settings → API** page. `Secrets.plist` is git-ignored. (This project
-already has a Supabase project provisioned — ask if you need the values
-again rather than creating a second project.)
+### 1. Auth (email/password now, Sign in with Apple ready but hidden)
 
-**6. Set up the database schema:** open your Supabase project's **SQL
-Editor**, paste in [`supabase/schema.sql`](supabase/schema.sql), and run it
-once. It creates all six tables from spec §5 and enables RLS with an
-open policy for the anon key (see the comment at the bottom of that file —
-this is a deliberate tradeoff for a solo project with no login screen).
+`SignInView` currently shows email/password sign-in/sign-up — no Apple
+Developer or Supabase provider configuration needed for this path, it works
+against any Supabase project out of the box. Verified live: ran the app in
+the iOS Simulator and submitted a real sign-up request against the actual
+Supabase project (not a mock) — it round-tripped to Supabase's Auth server
+and correctly surfaced its validation error ("Email address ... is
+invalid") in the UI, confirming the request/response wiring works end to
+end, not just that it compiles.
 
-**7. Build and run** in Xcode. `ContentView` is currently a connectivity
-smoke test — it fetches from the `habit` table and shows how many rows
-exist. Replace it with the real daily-log screen next (spec §8, step 2).
+Security notes on the email/password path: password goes over HTTPS only,
+never logged or stored client-side beyond the `@State` var cleared right
+after submit; hashing happens server-side in Supabase (GoTrue), the app
+never touches a hash. Client-side validation is just a `>= 8 chars` UX
+hint — Supabase's own server-side rules are the actual source of truth.
+
+Sign in with Apple's code is still in place (`AuthService.prepareAppleRequest`/
+`completeAppleSignIn`, the button in `SignInView`) but hidden behind
+`AuthFeatureFlags.appleSignInEnabled = false` in
+`Services/AuthFeatureFlags.swift`. Flip that to `true` once you've done the
+Apple Developer + Supabase provider setup below — nothing else needs to
+change.
+
+### Sign in with Apple setup (do this whenever you're ready to flip the flag)
+
+`supabase/schema.sql` was rewritten, not migrated in place — it now drops
+and recreates every table with `user_id`, a `profile` table, a trigger that
+creates a `profile` row on first sign-in, and RLS policies changed from
+"anon full access" to `using (auth.uid() = user_id) with check (auth.uid()
+= user_id)` on every table.
+
+**You need to re-run it**: open your Supabase project's **SQL Editor**,
+paste in the full contents of `supabase/schema.sql`, and run it. This drops
+whatever was in the tables before (there was only smoke-test data).
+
+**Two things only you can do, outside this repo, before Sign in with Apple
+actually works:**
+
+1. **Apple Developer Portal** (developer.apple.com, paid membership
+   required): create a **Services ID** for `com.kyleoden.kadence` (or reuse
+   the app ID directly if you enable "Sign in with Apple" on it), and a
+   **Sign in with Apple key** (Certificates, Identifiers & Profiles → Keys).
+   You'll get a Team ID, Key ID, and a `.p8` private key file.
+2. **Supabase Dashboard** → Authentication → Providers → **Apple**: enable
+   it and paste in the Team ID, Key ID, Services ID, and the private key
+   from step 1.
+
+In Xcode itself: open **Signing & Capabilities** on the Kadence target and
+make sure your Apple Developer **Team** is selected (not "None") — the
+`Kadence.entitlements` file (generated by `xcodegen` from `project.yml`)
+already declares the `com.apple.developer.applesignin` capability, but
+Xcode needs a real team to provision it.
+
+Until both of those are done, tapping the Sign in with Apple button will
+fail — that's expected, it's not a bug in the app code.
+
+New files: `Services/AuthService.swift` (nonce generation, Apple credential
+→ Supabase `signInWithIdToken` exchange, session state), `Views/SignInView.swift`,
+`Models/Profile.swift`, `Services/ProfileService.swift`. `ContentView` now
+gates on `AuthService.shared.session` — signed out shows `SignInView`,
+signed in shows `HomeView`.
+
+### 2. Tag case-insensitive normalization — now implemented in Swift
+
+You asked whether §6's "Japanese"/"japanese" collapsing was implemented
+anywhere — it wasn't yet (the schema alone can't enforce it). It's now in
+`Services/TagService.swift`: `resolve(_:)` lowercases + trims the input,
+looks for an existing tag with that `canonical` value, and reuses it if
+found. New tags get inserted with that lowercased `canonical`.
+
+One deliberate deviation from the spec doc: §6 says `display` should be the
+tag's "first-used casing." Per your message just now, `display` is instead
+always **Title Case**, computed from `canonical` at insert time, regardless
+of how the tag was originally typed. `TagService.suggestions(matching:)`
+covers the autosuggest-dropdown case, and `validate(_:)` enforces the max-3
+rule. None of this is wired into a UI yet since the daily-log entry form
+(spec §8, step 2) hasn't been built.
+
+### 3. Astrology-derived palette + fonts
+
+`Theme/Theme.swift` now has the full token set from spec §10
+(`bg`, `surface`, `textPrimary`, `textMuted`, `piscesTeal`, `piscesSeafoam`,
+`aquariusIce`, `capricornBronze`, `sagittariusIndigo`, `ariesEmber`) and the
+domain → color mapping. This replaces the placeholder v1-derived palette
+from the first pass.
+
+**Fonts are wired up but the font files themselves aren't in the repo yet.**
+`displayFont`/`bodyFont` reference `DMSerifDisplay-Regular` and
+`Inter-Regular` by PostScript name, and `project.yml` already registers
+those two filenames in `UIAppFonts`. Until the actual `.ttf` files exist at
+`Kadence/Resources/Fonts/`, `Font.custom` silently falls back to the system
+font — nothing crashes, it just won't look like DM Serif Display / Inter
+yet. Both are free on Google Fonts. I didn't download them for you since
+that's a file-download action I check with you on first — say the word and
+I'll fetch the two files, or drop them in yourself:
+
+- DM Serif Display: `DMSerifDisplay-Regular.ttf`
+- Inter: `Inter-Regular.ttf` (static, not the variable font — the filename
+  needs to match what's in `project.yml`)
+
+### Home screen header (spec §11)
+
+`Views/HomeHeaderView.swift` — personalized title from `profile.nickname`
+(falls back to "Kadence"), a date + weather line, and a rotating quote from
+`Theme/Quotes.swift` (static list, no API).
+
+Weather uses **Open-Meteo** (`Services/WeatherService.swift`) — chosen
+specifically because it needs no API key, so there's no third-party
+credential to manage. It geocodes `profile.current_location`, then pulls
+today's high/low + condition. Per spec §7/§11 this is the one non-Supabase
+external call in the app, so the UI shows "via Open-Meteo" next to the
+weather line rather than calling it silently. If `current_location` isn't
+set yet (no Settings screen exists to set it yet — that's spec §7a, not
+built this pass), the header shows "set your location in Settings for
+weather" instead of failing silently.
 
 ## Project layout
 
 ```
 Kadence/
-  KadenceApp.swift        — app entry point
-  Models/                 — Habit, LogEntry, Reading, Signal, Reflection, Tag
-  Services/                — Secrets.swift (reads Secrets.plist), SupabaseService.swift
-  Theme/                  — colors carried over from the v1 web app's palette
-  Views/                  — ContentView.swift (placeholder)
+  KadenceApp.swift
+  Models/          — Habit, LogEntry, Reading, Signal, Reflection, Tag, Profile
+  Services/        — Secrets, SupabaseService, AuthService, ProfileService, TagService, WeatherService
+  Theme/           — Theme.swift (palette + fonts), Quotes.swift
+  Views/           — ContentView, SignInView, HomeView, HomeHeaderView
 supabase/
-  schema.sql              — full schema, run once in the Supabase SQL editor
+  schema.sql       — full schema incl. auth/RLS, run in the Supabase SQL editor
 docs/
-  kadence-guide.md        — the why
-  kadence-spec.md         — the full technical spec
+  kadence-guide.md
+  kadence-spec.md
 ```
 
-## Notes carried over from v1
+## Not built this pass (still open)
 
-The old app (single-file `index.html`, GitHub Pages) had a dark theme and a
-color palette worth keeping — see `Kadence/Theme/Theme.swift`. It used the
-fonts DM Serif Display + Inter, but the font files themselves weren't in
-the repo, so the theme currently falls back to system fonts. No app icon
-existed in v1. See `docs/kadence-guide.md` for what v1 got wrong
-functionally (this v2 spec addresses all of it).
+- Daily log screen, habit management, Reading/Signal/Reflection modules,
+  full Settings screen (§7a — export/import/sign-out/reset). `HomeView` is
+  still a connectivity smoke test with a bare-bones sign-out button standing
+  in for it.
+- Actual font files (see above).

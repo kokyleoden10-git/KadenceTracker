@@ -2,6 +2,7 @@ import Foundation
 
 struct Reflection: Codable, Identifiable {
     let id: UUID
+    var userId: UUID
     var weekStart: Date
     var wentWell: String?
     var whatBroke: String?
@@ -10,6 +11,7 @@ struct Reflection: Codable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id
+        case userId = "user_id"
         case weekStart = "week_start"
         case wentWell = "went_well"
         case whatBroke = "what_broke"

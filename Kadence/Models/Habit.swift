@@ -14,6 +14,7 @@ enum Direction: String, Codable {
 
 struct Habit: Codable, Identifiable {
     let id: UUID
+    var userId: UUID
     var name: String
     var domain: Domain
     var tier: Tier
@@ -27,6 +28,7 @@ struct Habit: Codable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, name, domain, tier, direction
+        case userId = "user_id"
         case daysActive = "days_active"
         case identityStatement = "identity_statement"
         case stackCue = "stack_cue"

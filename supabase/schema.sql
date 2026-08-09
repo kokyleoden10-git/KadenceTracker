@@ -1,6 +1,27 @@
--- Kadence v2 schema
--- Mirrors docs/kadence-spec.md §5. Run this in the Supabase SQL editor
--- (Project → SQL Editor → New query) once, on a fresh project.
+-- Kadence v2 schema — auth-backed (updated spec §5, §5a)
+--
+-- This REPLACES the previous open-anon-key schema entirely (drop + recreate,
+-- not an in-place migration). Since the project only ever had smoke-test
+-- data on it, a clean replacement is simpler and safer than migrating old
+-- open-access tables to RLS in place. Run this whole file, once, in the
+-- Supabase SQL Editor (Project → SQL Editor → New query → paste → Run).
+
+drop trigger if exists on_auth_user_created on auth.users;
+drop function if exists public.handle_new_user();
+
+drop table if exists log_entry cascade;
+drop table if exists reading cascade;
+drop table if exists signal cascade;
+drop table if exists reflection cascade;
+drop table if exists tag cascade;
+drop table if exists habit cascade;
+drop table if exists profile cascade;
+
+drop type if exists domain_type cascade;
+drop type if exists tier_type cascade;
+drop type if exists direction_type cascade;
+drop type if exists privacy_tier_type cascade;
+drop type if exists reading_type cascade;
 
 create extension if not exists pgcrypto;
 
@@ -10,8 +31,24 @@ create type direction_type as enum ('build', 'reduce');
 create type privacy_tier_type as enum ('normal', 'sensitive');
 create type reading_type as enum ('tarot', 'astrology', 'other');
 
+-- profile ------------------------------------------------------------------
+-- One row per user, created automatically on first sign-in (trigger below).
+-- birthdate/birth_time/birth_location are captured now for a future
+-- chart-calculation feature but have no functional use yet — treat as
+-- sensitive (spec §7).
+create table profile (
+  user_id          uuid primary key references auth.users(id) on delete cascade,
+  nickname         text,
+  birthdate        date,
+  birth_time       time,
+  birth_location   text,
+  current_location text,
+  created_at       timestamptz not null default now()
+);
+
 create table habit (
   id                 uuid primary key default gen_random_uuid(),
+  user_id            uuid not null references auth.users(id) on delete cascade default auth.uid(),
   name               text not null,
   domain             domain_type not null,
   tier               tier_type not null,
@@ -24,11 +61,9 @@ create table habit (
   archived_at        timestamptz
 );
 
--- done_value holds a boolean-as-0/1 for anchor-style habits, or a 1-5 scale
--- for habits configured with a scale. Which interpretation applies is a
--- property of the parent habit (app-layer concern), not the schema.
 create table log_entry (
   id            uuid primary key default gen_random_uuid(),
+  user_id       uuid not null references auth.users(id) on delete cascade default auth.uid(),
   habit_id      uuid not null references habit(id) on delete cascade,
   date          date not null,
   done_value    smallint not null,
@@ -41,6 +76,7 @@ create table log_entry (
 
 create table reading (
   id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references auth.users(id) on delete cascade default auth.uid(),
   date       date not null,
   type       reading_type not null,
   deck       text,
@@ -53,6 +89,7 @@ create table reading (
 
 create table signal (
   id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references auth.users(id) on delete cascade default auth.uid(),
   date       date not null,
   metric     text not null,
   value      numeric not null,
@@ -62,32 +99,57 @@ create table signal (
 
 create table reflection (
   id              uuid primary key default gen_random_uuid(),
-  week_start      date not null unique,
+  user_id         uuid not null references auth.users(id) on delete cascade default auth.uid(),
+  week_start      date not null,
   went_well       text,
   what_broke      text,
   pattern_noticed text,
-  created_at      timestamptz not null default now()
+  created_at      timestamptz not null default now(),
+  unique (user_id, week_start)
 );
 
+-- Case-insensitive matching (spec §6) happens in the Swift layer (TagService)
+-- before insert — canonical is always stored lowercase+trimmed there.
 create table tag (
-  id           uuid primary key default gen_random_uuid(),
-  canonical    text not null unique,
-  display      text not null,
-  usage_count  int not null default 0
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references auth.users(id) on delete cascade default auth.uid(),
+  canonical   text not null,
+  display     text not null,
+  usage_count int not null default 0,
+  unique (user_id, canonical)
 );
 
-create index on log_entry (habit_id, date);
-create index on log_entry (date);
-create index on reading (date);
-create index on signal (date, metric);
+create index on log_entry (user_id, habit_id, date);
+create index on log_entry (user_id, date);
+create index on reading (user_id, date);
+create index on signal (user_id, date, metric);
+create index on habit (user_id);
+create index on tag (user_id);
 
--- Row Level Security -----------------------------------------------------
--- This app has no Supabase Auth login screen: the iOS app connects with the
--- anon key only. The policies below grant that key full read/write access.
--- That means anyone who obtains the project URL + anon key can read or
--- write this data. That's an accepted tradeoff for a solo personal project
--- (see docs/kadence-spec.md §7) — revisit with real auth if that changes.
+-- Auto-create a profile row on first sign-in --------------------------------
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  insert into public.profile (user_id) values (new.id)
+  on conflict (user_id) do nothing;
+  return new;
+end;
+$$;
 
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+-- Row Level Security ---------------------------------------------------------
+-- Every table scoped to auth.uid() = user_id (spec §5a, §7). This replaces
+-- the earlier "anon full access" model entirely — that model is superseded,
+-- not layered on top of. The app must now hold an authenticated session
+-- (Sign in with Apple) to read or write anything.
+
+alter table profile    enable row level security;
 alter table habit      enable row level security;
 alter table log_entry  enable row level security;
 alter table reading    enable row level security;
@@ -95,9 +157,10 @@ alter table signal     enable row level security;
 alter table reflection enable row level security;
 alter table tag        enable row level security;
 
-create policy "anon full access" on habit      for all using (true) with check (true);
-create policy "anon full access" on log_entry  for all using (true) with check (true);
-create policy "anon full access" on reading    for all using (true) with check (true);
-create policy "anon full access" on signal     for all using (true) with check (true);
-create policy "anon full access" on reflection for all using (true) with check (true);
-create policy "anon full access" on tag        for all using (true) with check (true);
+create policy "owner only" on profile    for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "owner only" on habit      for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "owner only" on log_entry  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "owner only" on reading    for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "owner only" on signal     for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "owner only" on reflection for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "owner only" on tag        for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
