@@ -109,25 +109,32 @@ struct HabitFormView: View {
             Text("Domain")
                 .font(KadenceTheme.bodyFont(12))
                 .foregroundStyle(KadenceTheme.textMuted)
-            HStack(spacing: 10) {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                 ForEach(Domain.allCases, id: \.self) { option in
+                    let isSelected = domain == option
+                    let color = KadenceTheme.color(for: option)
                     Button {
                         domain = option
                     } label: {
-                        VStack(spacing: 6) {
+                        HStack(spacing: 8) {
                             Circle()
-                                .fill(KadenceTheme.color(for: option))
-                                .frame(width: 22, height: 22)
-                                .overlay(
-                                    Circle()
-                                        .stroke(KadenceTheme.textPrimary, lineWidth: domain == option ? 2 : 0)
-                                        .padding(-3)
-                                )
+                                .fill(color)
+                                .frame(width: 12, height: 12)
                             Text(option.rawValue.capitalized)
-                                .font(KadenceTheme.bodyFont(11))
-                                .foregroundStyle(domain == option ? KadenceTheme.textPrimary : KadenceTheme.textMuted)
+                                .font(KadenceTheme.bodyFontSemibold(14))
+                                .foregroundStyle(KadenceTheme.textPrimary)
+                            Spacer(minLength: 0)
                         }
+                        .padding(14)
                         .frame(maxWidth: .infinity)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(isSelected ? color.opacity(0.22) : KadenceTheme.surface)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(isSelected ? color : .clear, lineWidth: 1.5)
+                        )
                     }
                 }
             }
