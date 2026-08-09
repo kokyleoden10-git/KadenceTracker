@@ -25,35 +25,46 @@ struct HomeView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                KadenceTheme.bg.ignoresSafeArea()
+            List {
+                HomeHeaderView(profile: profile, status: status)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        HomeHeaderView(profile: profile, status: status)
-
-                        if todaysHabits.isEmpty && status.isEmpty {
-                            emptyState
-                        } else {
-                            VStack(spacing: 8) {
-                                ForEach(todaysHabits) { habit in
-                                    DailyHabitRow(
-                                        habit: habit,
-                                        state: state(for: habit),
-                                        onToggleDone: { toggleDone(habit) },
-                                        onMarkNotDone: { markNotDone(habit) },
-                                        onClear: { clearLog(habit) },
-                                        onOpenDetail: { openDetail(habit) },
-                                        onEdit: { editHabit = habit }
-                                    )
-                                }
+                if todaysHabits.isEmpty && status.isEmpty {
+                    emptyState
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 16, trailing: 16))
+                } else {
+                    ForEach(todaysHabits) { habit in
+                        DailyHabitRow(
+                            habit: habit,
+                            state: state(for: habit),
+                            onToggleDone: { toggleDone(habit) },
+                            onOpenDetail: { openDetail(habit) },
+                            onEdit: { editHabit = habit }
+                        )
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            // Deliberately not red/destructive-styled — a
+                            // skipped day isn't an error state (spec §1:
+                            // "instrument, not judge").
+                            Button("Not Done") { markNotDone(habit) }
+                                .tint(KadenceTheme.textMuted)
+                            if state(for: habit) != .notLogged {
+                                Button("Clear", role: .destructive) { clearLog(habit) }
                             }
                         }
                     }
-                    .padding()
                 }
-                .refreshable { await load() }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(KadenceTheme.bg.ignoresSafeArea())
+            .refreshable { await load() }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

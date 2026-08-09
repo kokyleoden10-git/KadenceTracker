@@ -6,11 +6,16 @@ enum PrivacyTier: String, Codable {
 
 /// `doneValue` is 0/1 for boolean-style habits, or 1-5 for habits configured
 /// with a scale. The parent Habit determines which interpretation applies.
+///
+/// `date` is a bare Postgres `date` column (no time/timezone) — kept as a
+/// "yyyy-MM-dd" String rather than Date for the same reason as
+/// Profile.birthdate: PostgREST returns it with no time component, which
+/// Swift's Date decoder can't parse, and it isn't a moment in time anyway.
 struct LogEntry: Codable, Identifiable {
     let id: UUID
     var userId: UUID
     var habitId: UUID
-    var date: Date
+    var date: String
     var doneValue: Int
     var note: String?
     var tags: [String]

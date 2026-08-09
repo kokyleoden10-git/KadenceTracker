@@ -5,6 +5,11 @@ import SwiftUI
 /// (a deliberate honest entry, distinct from "not yet" — spec's
 /// break_context prompt only makes sense for this state, per Power of
 /// Habit's cue-tracking-on-breaks idea).
+///
+/// "Not done" is deliberately styled neutral, not alarming — no red, no X.
+/// The whole point of "instrument, not judge" (spec §1) is that a skipped
+/// day is a data point, not a failure, and the UI shouldn't visually
+/// contradict that by making a miss look like an error state.
 enum DailyLogState {
     case notLogged
     case done
@@ -15,8 +20,6 @@ struct DailyHabitRow: View {
     let habit: Habit
     let state: DailyLogState
     var onToggleDone: () -> Void
-    var onMarkNotDone: () -> Void
-    var onClear: () -> Void
     var onOpenDetail: () -> Void
     var onEdit: () -> Void
 
@@ -26,13 +29,6 @@ struct DailyHabitRow: View {
                 checkbox
             }
             .buttonStyle(.plain)
-            .contextMenu {
-                Button("Mark Done", action: onToggleDone)
-                Button("Mark Not Done", action: onMarkNotDone)
-                if state != .notLogged {
-                    Button("Clear", role: .destructive, action: onClear)
-                }
-            }
 
             Button(action: onOpenDetail) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -42,13 +38,20 @@ struct DailyHabitRow: View {
                         .strikethrough(state == .done, color: KadenceTheme.textMuted)
 
                     HStack(spacing: 6) {
-                        Text(habit.tier == .anchor ? "Anchor" : "Practice")
+                        Text(habit.tier == .anchor ? "Anchor" : "Practice \u{00B7} important, not urgent")
                         if habit.direction == .reduce {
                             Text("\u{00B7} Reduce")
                         }
                     }
                     .font(KadenceTheme.bodyFont(11))
                     .foregroundStyle(KadenceTheme.textMuted)
+
+                    if let identity = habit.identityStatement, !identity.isEmpty {
+                        Text("\u{201C}\(identity)\u{201D}")
+                            .font(KadenceTheme.bodyFont(11))
+                            .italic()
+                            .foregroundStyle(KadenceTheme.piscesSeafoam.opacity(0.85))
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -84,13 +87,12 @@ struct DailyHabitRow: View {
                 )
         case .notDone:
             Circle()
-                .fill(KadenceTheme.surface)
+                .stroke(KadenceTheme.textMuted, lineWidth: 2)
                 .frame(width: 26, height: 26)
-                .overlay(Circle().stroke(KadenceTheme.ariesEmber, lineWidth: 2))
                 .overlay(
-                    Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(KadenceTheme.ariesEmber)
+                    Rectangle()
+                        .fill(KadenceTheme.textMuted)
+                        .frame(width: 10, height: 2)
                 )
         }
     }
