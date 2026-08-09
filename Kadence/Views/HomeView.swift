@@ -1,5 +1,11 @@
 import SwiftUI
 
+enum HabitGroupMode: String, CaseIterable {
+    case none = "Default Order"
+    case domain = "By Domain"
+    case tier = "By Tier"
+}
+
 /// Spec §8 step 2 — the 2-minute-a-day surface. Shows only today's active
 /// Anchors + Practices (per days_active), not every habit ever created
 /// (that's ManageHabitsView). Tapping a habit's checkbox is the entire
@@ -11,6 +17,9 @@ struct HomeView: View {
     @State private var profile: Profile?
     @State private var status = "Loading\u{2026}"
 
+    @AppStorage("homeGroupMode") private var groupModeRaw = HabitGroupMode.none.rawValue
+    private var groupMode: HabitGroupMode { HabitGroupMode(rawValue: groupModeRaw) ?? .none }
+
     @State private var isManagingHabits = false
     @State private var editHabit: Habit?
     @State private var detailHabit: Habit?
@@ -21,6 +30,29 @@ struct HomeView: View {
     private var todaysHabits: [Habit] {
         let todayIndex = LogEntryService.todayWeekdayIndex()
         return habits.filter { $0.daysActive.contains(todayIndex) }
+    }
+
+    /// Empty groups are dropped — no point showing a "Systems" header for a
+    /// day with nothing scheduled in that domain (spec's own "not every
+    /// domain needs attention every day").
+    private var groupedSections: [(title: String, color: Color?, habits: [Habit])] {
+        switch groupMode {
+        case .none:
+            return [("", nil, todaysHabits)]
+        case .domain:
+            return Domain.allCases.compactMap { domain in
+                let matches = todaysHabits.filter { $0.domain == domain }
+                guard !matches.isEmpty else { return nil }
+                return (domain.rawValue.capitalized, KadenceTheme.color(for: domain), matches)
+            }
+        case .tier:
+            let anchors = todaysHabits.filter { $0.tier == .anchor }
+            let practices = todaysHabits.filter { $0.tier == .practice }
+            var sections: [(String, Color?, [Habit])] = []
+            if !anchors.isEmpty { sections.append(("Anchors", nil, anchors)) }
+            if !practices.isEmpty { sections.append(("Practices \u{00B7} important, not urgent", nil, practices)) }
+            return sections
+        }
     }
 
     var body: some View {
@@ -37,25 +69,42 @@ struct HomeView: View {
                         .listRowSeparator(.hidden)
                         .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 16, trailing: 16))
                 } else {
-                    ForEach(todaysHabits) { habit in
-                        DailyHabitRow(
-                            habit: habit,
-                            state: state(for: habit),
-                            onToggleDone: { toggleDone(habit) },
-                            onOpenDetail: { openDetail(habit) },
-                            onEdit: { editHabit = habit }
-                        )
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            // Deliberately not red/destructive-styled — a
-                            // skipped day isn't an error state (spec §1:
-                            // "instrument, not judge").
-                            Button("Not Done") { markNotDone(habit) }
-                                .tint(KadenceTheme.textMuted)
-                            if state(for: habit) != .notLogged {
-                                Button("Clear", role: .destructive) { clearLog(habit) }
+                    ForEach(groupedSections, id: \.title) { section in
+                        if !section.title.isEmpty {
+                            HStack(spacing: 6) {
+                                if let color = section.color {
+                                    Circle().fill(color).frame(width: 8, height: 8)
+                                }
+                                Text(section.title.uppercased())
+                                    .font(KadenceTheme.bodyFontSemibold(11))
+                                    .tracking(1)
+                            }
+                            .foregroundStyle(KadenceTheme.textMuted)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 2, trailing: 16))
+                        }
+
+                        ForEach(section.habits) { habit in
+                            DailyHabitRow(
+                                habit: habit,
+                                state: state(for: habit),
+                                onToggleDone: { toggleDone(habit) },
+                                onOpenDetail: { openDetail(habit) },
+                                onEdit: { editHabit = habit }
+                            )
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                // Deliberately not red/destructive-styled — a
+                                // skipped day isn't an error state (spec §1:
+                                // "instrument, not judge").
+                                Button("Not Done") { markNotDone(habit) }
+                                    .tint(KadenceTheme.textMuted)
+                                if state(for: habit) != .notLogged {
+                                    Button("Clear", role: .destructive) { clearLog(habit) }
+                                }
                             }
                         }
                     }
@@ -66,6 +115,18 @@ struct HomeView: View {
             .background(KadenceTheme.bg.ignoresSafeArea())
             .refreshable { await load() }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu {
+                        Picker("Sort", selection: $groupModeRaw) {
+                            ForEach(HabitGroupMode.allCases, id: \.self) { mode in
+                                Text(mode.rawValue).tag(mode.rawValue)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down.circle")
+                            .foregroundStyle(KadenceTheme.piscesTeal)
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         isManagingHabits = true

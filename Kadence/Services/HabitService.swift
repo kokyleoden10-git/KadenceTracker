@@ -58,8 +58,9 @@ enum HabitService {
             .execute()
     }
 
-    /// Soft delete only — spec §5 says never hard-delete user data outside
-    /// the explicit "Clear All Data" reset in Settings.
+    /// Soft delete — reversible in spirit (data's still there, just
+    /// hidden from fetchActive), matching spec §5's "never hard-delete"
+    /// default.
     static func archive(_ id: UUID) async throws {
         struct ArchivePatch: Encodable {
             let archivedAt: Date
@@ -68,6 +69,19 @@ enum HabitService {
         try await SupabaseService.shared.client
             .from("habit")
             .update(ArchivePatch(archivedAt: Date()))
+            .eq("id", value: id)
+            .execute()
+    }
+
+    /// Real hard delete — an explicit exception to spec §5's "never
+    /// hard-delete" default, added on request. log_entry.habit_id has
+    /// `on delete cascade`, so this also permanently destroys every logged
+    /// entry for this habit, not just the habit definition. The confirming
+    /// UI must say so, not just "can't be undone."
+    static func delete(_ id: UUID) async throws {
+        try await SupabaseService.shared.client
+            .from("habit")
+            .delete()
             .eq("id", value: id)
             .execute()
     }

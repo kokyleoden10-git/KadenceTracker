@@ -36,8 +36,10 @@ struct HabitFormView: View {
 
     @State private var isSaving = false
     @State private var isArchiving = false
+    @State private var isDeleting = false
     @State private var errorMessage: String?
     @State private var isConfirmingArchive = false
+    @State private var isConfirmingDelete = false
 
     private let dayLabels = ["S", "M", "T", "W", "T", "F", "S"]
 
@@ -73,6 +75,7 @@ struct HabitFormView: View {
 
                     if case .edit(let habit) = mode {
                         archiveButton(habit)
+                        deleteButton(habit)
                     }
                 }
                 .padding()
@@ -277,6 +280,33 @@ struct HabitFormView: View {
         }
     }
 
+    /// Deliberately styled more severely than Archive (solid fill vs.
+    /// outline) — this is a real hard delete, an explicit exception to
+    /// spec §5's "never hard-delete" default, added on request. It also
+    /// cascades to permanently destroy every logged entry for this habit,
+    /// not just the habit definition, so the confirmation says that
+    /// explicitly rather than a generic "can't be undone."
+    private func deleteButton(_ habit: Habit) -> some View {
+        Button("Delete Habit Permanently") {
+            isConfirmingDelete = true
+        }
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .background(KadenceTheme.ariesEmber)
+        .foregroundStyle(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .disabled(isDeleting)
+        .confirmationDialog(
+            "This permanently deletes \"\(habit.name)\" and every day you've ever logged for it. This cannot be undone — there is no backup copy kept.",
+            isPresented: $isConfirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Forever", role: .destructive) {
+                Task { await delete(habit) }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+
     private func populateIfEditing() {
         guard case .edit(let habit) = mode else { return }
         name = habit.name
@@ -327,6 +357,18 @@ struct HabitFormView: View {
             dismiss()
         } catch {
             errorMessage = "Couldn't archive: \(error.localizedDescription)"
+        }
+    }
+
+    private func delete(_ habit: Habit) async {
+        isDeleting = true
+        defer { isDeleting = false }
+        do {
+            try await HabitService.delete(habit.id)
+            onSaved()
+            dismiss()
+        } catch {
+            errorMessage = "Couldn't delete: \(error.localizedDescription)"
         }
     }
 }
