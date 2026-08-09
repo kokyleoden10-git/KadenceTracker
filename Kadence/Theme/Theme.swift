@@ -16,10 +16,13 @@ extension Color {
 /// Astrology-derived palette (spec §10). Domain and font choices are all
 /// driven from here so there's one place to retune the theme.
 ///
-/// Fonts reference DM Serif Display + Inter by PostScript name. The actual
-/// .ttf files aren't bundled yet — drop them into Kadence/Resources/Fonts/
-/// (filenames must match project.yml's UIAppFonts list) or Font.custom
-/// silently falls back to the system font.
+/// DM Serif Display (headers/display) + Inter (body/UI) — bundled under
+/// Kadence/Resources/Fonts/, registered in project.yml's UIAppFonts.
+/// DM Serif Display only ships a Regular weight (no true bold face), so
+/// don't apply .fontWeight() on top of displayFont — it'll synthetically
+/// (faux-)bold rather than use a real bold glyph set. Use bodyFontSemibold
+/// for emphasis on body text instead of .fontWeight(.semibold)/.bold() on
+/// top of bodyFont, for the same reason.
 enum KadenceTheme {
     static let bg = Color(hex: "12181A")
     static let surface = Color(hex: "1B2427")
@@ -48,5 +51,9 @@ enum KadenceTheme {
 
     static func bodyFont(_ size: CGFloat = 16) -> Font {
         .custom("Inter-Regular", size: size)
+    }
+
+    static func bodyFontSemibold(_ size: CGFloat = 16) -> Font {
+        .custom("Inter-SemiBold", size: size)
     }
 }

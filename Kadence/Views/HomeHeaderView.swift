@@ -29,15 +29,13 @@ struct HomeHeaderView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
-                .font(KadenceTheme.bodyFont(12))
-                .fontWeight(.semibold)
+                .font(KadenceTheme.bodyFontSemibold(12))
                 .tracking(1.4)
                 .textCase(.uppercase)
                 .foregroundStyle(KadenceTheme.textMuted)
 
             Text(dateHeading)
                 .font(KadenceTheme.displayFont(32))
-                .fontWeight(.bold)
                 .foregroundStyle(KadenceTheme.textPrimary)
 
             if let weather {

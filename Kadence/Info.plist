@@ -24,6 +24,7 @@
 	<array>
 		<string>DMSerifDisplay-Regular.ttf</string>
 		<string>Inter-Regular.ttf</string>
+		<string>Inter-SemiBold.ttf</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>

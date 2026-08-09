@@ -17,6 +17,7 @@ targets:
         UIAppFonts:
           - DMSerifDisplay-Regular.ttf
           - Inter-Regular.ttf
+          - Inter-SemiBold.ttf
     # Sign in with Apple's entitlement is deliberately omitted for now — a
     # free Apple ID / personal team can't provision it, and the feature is
     # already hidden behind AuthFeatureFlags.appleSignInEnabled. Restore
