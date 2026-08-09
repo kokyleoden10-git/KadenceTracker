@@ -204,13 +204,11 @@ struct SettingsView: View {
                 }
             }
             .tint(KadenceTheme.ariesEmber)
-            .confirmationDialog(
-                "Turning this on lets you permanently delete a habit from its edit screen. Deleting a habit also destroys every entry you've ever logged for it — there's no undo and no backup copy.",
-                isPresented: $isConfirmingEnableDelete,
-                titleVisibility: .visible
-            ) {
+            .alert("Allow Permanent Deletion?", isPresented: $isConfirmingEnableDelete) {
                 Button("Enable", role: .destructive) { permanentDeletionEnabled = true }
                 Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This lets you permanently delete a habit from its edit screen. Deleting a habit also destroys every entry you've ever logged for it — there's no undo and no backup copy.")
             }
 
             Button("Sign Out") {

@@ -42,12 +42,16 @@ struct HomeHeaderView: View {
                 Text("\(weather.locationLabel.uppercased())  |  HIGH \(weather.highF)\u{00B0} \u{00B7} LOW \(weather.lowF)\u{00B0} \u{00B7} \(weather.condition.uppercased())")
                     .font(KadenceTheme.bodyFont(11))
                     .tracking(0.8)
+                    .lineSpacing(6)
                     .foregroundStyle(KadenceTheme.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
             } else if let weatherStatus {
                 Text(weatherStatus.uppercased())
                     .font(KadenceTheme.bodyFont(11))
                     .tracking(0.8)
+                    .lineSpacing(6)
                     .foregroundStyle(KadenceTheme.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if !status.isEmpty {

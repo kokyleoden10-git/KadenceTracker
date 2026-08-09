@@ -38,13 +38,20 @@ struct DailyHabitRow: View {
                         .strikethrough(state == .done, color: KadenceTheme.textMuted)
 
                     HStack(spacing: 6) {
-                        Text(habit.tier == .anchor ? "Anchor" : "Practice \u{00B7} important, not urgent")
+                        // Slightly more emphasis than the rest of the
+                        // metadata line — the "Practices · important, not
+                        // urgent" framing lives on the group header when
+                        // sorted by tier (HomeView), so it'd be redundant
+                        // to repeat in full on every single row.
+                        Text(habit.tier == .anchor ? "Anchor" : "Practice")
+                            .font(KadenceTheme.bodyFontSemibold(11))
+                            .foregroundStyle(KadenceTheme.textMuted.opacity(0.95))
                         if habit.direction == .reduce {
                             Text("\u{00B7} Reduce")
+                                .font(KadenceTheme.bodyFont(11))
+                                .foregroundStyle(KadenceTheme.textMuted)
                         }
                     }
-                    .font(KadenceTheme.bodyFont(11))
-                    .foregroundStyle(KadenceTheme.textMuted)
 
                     if let identity = habit.identityStatement, !identity.isEmpty {
                         Text("\u{201C}\(identity)\u{201D}")
