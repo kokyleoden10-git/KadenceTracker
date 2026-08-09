@@ -1,44 +1,81 @@
 import SwiftUI
 
-/// Smoke-test screen: confirms auth + Supabase wiring end to end. Replace
-/// the habit list with the real daily-log screen (spec §8, step 2).
 struct HomeView: View {
     @State private var habits: [Habit] = []
     @State private var profile: Profile?
     @State private var status = "Loading\u{2026}"
+    @State private var formMode: HabitFormView.Mode?
 
     var body: some View {
-        ZStack {
-            KadenceTheme.bg.ignoresSafeArea()
+        NavigationStack {
+            ZStack {
+                KadenceTheme.bg.ignoresSafeArea()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    HomeHeaderView(profile: profile, status: status)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        HomeHeaderView(profile: profile, status: status)
 
-                    ForEach(habits) { habit in
-                        HStack {
-                            Circle()
-                                .fill(KadenceTheme.color(for: habit.domain))
-                                .frame(width: 10, height: 10)
-                            Text(habit.name)
-                                .foregroundStyle(KadenceTheme.textPrimary)
+                        if habits.isEmpty && status.isEmpty {
+                            emptyState
+                        } else {
+                            VStack(spacing: 8) {
+                                ForEach(habits) { habit in
+                                    HabitRow(habit: habit) {
+                                        formMode = .edit(habit)
+                                    }
+                                }
+                            }
                         }
                     }
+                    .padding()
                 }
-                .padding()
+                .refreshable { await load() }
             }
-            .refreshable { await load() }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        formMode = .create
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .foregroundStyle(KadenceTheme.piscesTeal)
+                    }
+                }
+            }
         }
         .task { await load() }
+        .sheet(item: $formMode) { mode in
+            HabitFormView(mode: mode) {
+                Task { await load() }
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Nothing tracked yet.")
+                .font(KadenceTheme.bodyFont(15))
+                .foregroundStyle(KadenceTheme.textMuted)
+
+            Button {
+                formMode = .create
+            } label: {
+                Text("Add your first habit")
+                    .font(KadenceTheme.bodyFontSemibold(15))
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .background(KadenceTheme.piscesTeal)
+            .foregroundStyle(KadenceTheme.bg)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
     }
 
     private func load() async {
         do {
             async let profileTask = ProfileService.fetchCurrent()
-            async let habitsTask = SupabaseService.shared.fetchHabits()
+            async let habitsTask = HabitService.fetchActive()
             profile = try await profileTask
             habits = try await habitsTask
-            status = habits.isEmpty ? "No habits yet." : "\(habits.count) habit(s)."
+            status = ""
         } catch {
             status = "Couldn't load data: \(error.localizedDescription)"
         }

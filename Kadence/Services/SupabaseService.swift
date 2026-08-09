@@ -12,13 +12,4 @@ final class SupabaseService {
         }
         client = SupabaseClient(supabaseURL: url, supabaseKey: Secrets.supabaseAnonKey)
     }
-
-    func fetchHabits() async throws -> [Habit] {
-        try await client
-            .from("habit")
-            .select()
-            .is("archived_at", value: nil)
-            .execute()
-            .value
-    }
 }

@@ -50,9 +50,11 @@ struct HomeHeaderView: View {
                     .foregroundStyle(KadenceTheme.textMuted)
             }
 
-            Text(status)
-                .font(KadenceTheme.bodyFont(14))
-                .foregroundStyle(KadenceTheme.textMuted)
+            if !status.isEmpty {
+                Text(status)
+                    .font(KadenceTheme.bodyFont(14))
+                    .foregroundStyle(KadenceTheme.textMuted)
+            }
 
             Text("\u{201C}\(quote.text)\u{201D}")
                 .font(KadenceTheme.bodyFont(15))
