@@ -29,6 +29,8 @@ struct SettingsView: View {
     @State private var isConfirmingReset = false
     @State private var isResetting = false
 
+    @AppStorage("permanentDeletionEnabled") private var permanentDeletionEnabled = false
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
@@ -180,6 +182,18 @@ struct SettingsView: View {
     private var dangerZoneSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeader("Danger Zone")
+
+            Toggle(isOn: $permanentDeletionEnabled) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Allow permanently deleting habits")
+                        .font(KadenceTheme.bodyFont(14))
+                        .foregroundStyle(KadenceTheme.textPrimary)
+                    Text("Off by default. When off, only Archive is available when editing a habit.")
+                        .font(KadenceTheme.bodyFont(11))
+                        .foregroundStyle(KadenceTheme.textMuted)
+                }
+            }
+            .tint(KadenceTheme.ariesEmber)
 
             Button("Sign Out") {
                 Task { try? await AuthService.shared.signOut() }

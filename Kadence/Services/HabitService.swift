@@ -11,6 +11,16 @@ enum HabitService {
             .value
     }
 
+    static func fetchArchived() async throws -> [Habit] {
+        try await SupabaseService.shared.client
+            .from("habit")
+            .select()
+            .not("archived_at", operator: .is, value: "null")
+            .order("archived_at", ascending: false)
+            .execute()
+            .value
+    }
+
     struct HabitInput: Encodable {
         var name: String
         var domain: Domain
@@ -69,6 +79,25 @@ enum HabitService {
         try await SupabaseService.shared.client
             .from("habit")
             .update(ArchivePatch(archivedAt: Date()))
+            .eq("id", value: id)
+            .execute()
+    }
+
+    /// Reverses `archive`. Same encodeIfPresent trap as ProfileUpdate/
+    /// HabitInput applies here — a plain `Encodable` with `archivedAt: nil`
+    /// would omit the key and leave the habit archived, so this encodes
+    /// explicitly.
+    static func unarchive(_ id: UUID) async throws {
+        struct UnarchivePatch: Encodable {
+            enum CodingKeys: String, CodingKey { case archivedAt = "archived_at" }
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeNil(forKey: .archivedAt)
+            }
+        }
+        try await SupabaseService.shared.client
+            .from("habit")
+            .update(UnarchivePatch())
             .eq("id", value: id)
             .execute()
     }

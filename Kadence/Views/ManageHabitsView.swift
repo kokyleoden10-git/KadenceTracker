@@ -4,10 +4,21 @@ import SwiftUI
 /// schedule. Deliberately separate from HomeView (step 2, the daily log
 /// surface, today-only) rather than conflated into one screen.
 struct ManageHabitsView: View {
-    @State private var habits: [Habit] = []
+    private enum Scope: String, CaseIterable {
+        case active = "Active"
+        case archived = "Archived"
+    }
+
+    @State private var scope: Scope = .active
+    @State private var activeHabits: [Habit] = []
+    @State private var archivedHabits: [Habit] = []
     @State private var status = "Loading\u{2026}"
     @State private var formMode: HabitFormView.Mode?
     @Environment(\.dismiss) private var dismiss
+
+    private var visibleHabits: [Habit] {
+        scope == .active ? activeHabits : archivedHabits
+    }
 
     var body: some View {
         NavigationStack {
@@ -16,14 +27,21 @@ struct ManageHabitsView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
-                        if habits.isEmpty && status.isEmpty {
+                        Picker("Scope", selection: $scope) {
+                            ForEach(Scope.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+
+                        if visibleHabits.isEmpty && status.isEmpty {
                             emptyState
                         } else {
                             VStack(spacing: 8) {
-                                ForEach(habits) { habit in
-                                    HabitRow(habit: habit) {
-                                        formMode = .edit(habit)
-                                    }
+                                ForEach(visibleHabits) { habit in
+                                    HabitRow(
+                                        habit: habit,
+                                        action: { formMode = .edit(habit) },
+                                        unarchiveAction: scope == .archived ? { unarchive(habit) } : nil
+                                    )
                                 }
                             }
                         }
@@ -66,29 +84,49 @@ struct ManageHabitsView: View {
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("No habits yet.")
-                .font(KadenceTheme.bodyFont(15))
-                .foregroundStyle(KadenceTheme.textMuted)
+            if scope == .active {
+                Text("No habits yet.")
+                    .font(KadenceTheme.bodyFont(15))
+                    .foregroundStyle(KadenceTheme.textMuted)
 
-            Button {
-                formMode = .create
-            } label: {
-                Text("Add your first habit")
-                    .font(KadenceTheme.bodyFontSemibold(15))
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                Button {
+                    formMode = .create
+                } label: {
+                    Text("Add your first habit")
+                        .font(KadenceTheme.bodyFontSemibold(15))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .background(KadenceTheme.piscesTeal)
+                .foregroundStyle(KadenceTheme.bg)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            } else {
+                Text("No archived habits.")
+                    .font(KadenceTheme.bodyFont(15))
+                    .foregroundStyle(KadenceTheme.textMuted)
             }
-            .background(KadenceTheme.piscesTeal)
-            .foregroundStyle(KadenceTheme.bg)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
         }
     }
 
     private func load() async {
         do {
-            habits = try await HabitService.fetchActive()
+            async let activeTask = HabitService.fetchActive()
+            async let archivedTask = HabitService.fetchArchived()
+            activeHabits = try await activeTask
+            archivedHabits = try await archivedTask
             status = ""
         } catch {
             status = "Couldn't load: \(error.localizedDescription)"
+        }
+    }
+
+    private func unarchive(_ habit: Habit) {
+        Task {
+            do {
+                try await HabitService.unarchive(habit.id)
+                await load()
+            } catch {
+                status = "Couldn't restore: \(error.localizedDescription)"
+            }
         }
     }
 }

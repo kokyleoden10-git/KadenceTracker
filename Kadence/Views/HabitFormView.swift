@@ -41,6 +41,8 @@ struct HabitFormView: View {
     @State private var isConfirmingArchive = false
     @State private var isConfirmingDelete = false
 
+    @AppStorage("permanentDeletionEnabled") private var permanentDeletionEnabled = false
+
     private let dayLabels = ["S", "M", "T", "W", "T", "F", "S"]
 
     private var isValid: Bool {
@@ -75,7 +77,9 @@ struct HabitFormView: View {
 
                     if case .edit(let habit) = mode {
                         archiveButton(habit)
-                        deleteButton(habit)
+                        if permanentDeletionEnabled {
+                            deleteButton(habit)
+                        }
                     }
                 }
                 .padding()
