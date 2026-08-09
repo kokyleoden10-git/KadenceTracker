@@ -78,12 +78,14 @@ struct HomeHeaderView: View {
         }
         .task(id: profile?.currentLocation) {
             guard let location = profile?.currentLocation, !location.isEmpty else {
+                weather = nil
                 weatherStatus = nil
                 return
             }
             do {
                 weather = try await WeatherService.fetch(for: location)
             } catch {
+                weather = nil
                 weatherStatus = "weather unavailable"
             }
         }
