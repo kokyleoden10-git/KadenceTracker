@@ -28,13 +28,6 @@ struct HomeView: View {
                                 .foregroundStyle(KadenceTheme.textPrimary)
                         }
                     }
-
-                    Button("Sign out") {
-                        Task { try? await AuthService.shared.signOut() }
-                    }
-                    .font(KadenceTheme.bodyFont(13))
-                    .foregroundStyle(KadenceTheme.textMuted)
-                    .padding(.top, 24)
                 }
                 .padding()
             }

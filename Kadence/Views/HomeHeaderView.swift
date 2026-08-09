@@ -47,8 +47,11 @@ struct HomeHeaderView: View {
                 .padding(.top, 4)
         }
         .task(id: profile?.currentLocation) {
+            // No Settings screen exists yet to set current_location, so
+            // there's nothing actionable to nudge the user toward — just
+            // omit the weather line entirely until that's built.
             guard let location = profile?.currentLocation, !location.isEmpty else {
-                weatherStatus = "set your location in Settings for weather"
+                weatherStatus = nil
                 return
             }
             do {
