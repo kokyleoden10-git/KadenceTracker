@@ -17,17 +17,18 @@ targets:
         UIAppFonts:
           - DMSerifDisplay-Regular.ttf
           - Inter-Regular.ttf
-    entitlements:
-      path: Kadence/Kadence.entitlements
-      properties:
-        com.apple.developer.applesignin:
-          - Default
+    # Sign in with Apple's entitlement is deliberately omitted for now — a
+    # free Apple ID / personal team can't provision it, and the feature is
+    # already hidden behind AuthFeatureFlags.appleSignInEnabled. Restore
+    # this block (see git history) once you've enrolled in the paid Apple
+    # Developer Program and are ready to flip that flag on.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.kyleoden.kadence
         PRODUCT_NAME: Kadence
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     dependencies:
       - package: Supabase
 packages:
