@@ -18,7 +18,7 @@ enum ProfileService {
         var nickname: String?
         var currentLocation: String?
         var birthLocation: String?
-        var birthdate: Date?
+        var birthdate: String?
         var birthTime: String?
 
         enum CodingKeys: String, CodingKey {

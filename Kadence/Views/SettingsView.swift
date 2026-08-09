@@ -1,17 +1,18 @@
 import SwiftUI
 
-/// Spec §7a. Profile fields are plain text (including birthdate/birth time
-/// as "YYYY-MM-DD"/"HH:MM" strings) rather than pickers — this is a
-/// single-user utility app, and plain text keeps the form simple and
-/// consistent rather than adding picker/toggle state for rarely-edited
-/// fields.
+/// Spec §7a. Birthdate/birth time use DatePicker (there's no "unset" state
+/// once touched — they default to Jan 1 2000 / noon rather than gating
+/// behind an extra toggle, matching the app's "sensible defaults over
+/// exhaustive config" philosophy). Locations use MapKit autocomplete but
+/// stay freeform text underneath — picking a suggestion just fills the
+/// field, it doesn't lock you out of typing something else.
 struct SettingsView: View {
     @State private var profile: Profile?
     @State private var email: String = ""
 
     @State private var nickname = ""
-    @State private var birthdate = ""
-    @State private var birthTime = ""
+    @State private var birthdateDate = Calendar.current.date(from: DateComponents(year: 2000, month: 1, day: 1)) ?? Date()
+    @State private var birthTimeDate = Calendar.current.date(from: DateComponents(hour: 12, minute: 0)) ?? Date()
     @State private var birthLocation = ""
     @State private var currentLocation = ""
 
@@ -46,10 +47,10 @@ struct SettingsView: View {
 
             labeledField("Email", text: .constant(email), disabled: true)
             labeledField("Nickname", text: $nickname)
-            labeledField("Birthdate (YYYY-MM-DD)", text: $birthdate)
-            labeledField("Birth time (HH:MM)", text: $birthTime)
-            labeledField("Birth location", text: $birthLocation)
-            labeledField("Current location", text: $currentLocation)
+            labeledDateField("Birthdate", selection: $birthdateDate, components: .date)
+            labeledDateField("Birth time", selection: $birthTimeDate, components: .hourAndMinute)
+            LocationSearchField(label: "Birth location", text: $birthLocation)
+            LocationSearchField(label: "Current location", text: $currentLocation)
 
             Button(action: save) {
                 if isSaving {
@@ -159,6 +160,23 @@ struct SettingsView: View {
             .foregroundStyle(KadenceTheme.textPrimary)
     }
 
+    private func labeledDateField(_ label: String, selection: Binding<Date>, components: DatePickerComponents) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(KadenceTheme.bodyFont(12))
+                .foregroundStyle(KadenceTheme.textMuted)
+            DatePicker(label, selection: selection, displayedComponents: components)
+                .labelsHidden()
+                .datePickerStyle(.compact)
+                .tint(KadenceTheme.piscesTeal)
+                .environment(\.colorScheme, .dark)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(KadenceTheme.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
     private func labeledField(_ label: String, text: Binding<String>, disabled: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
@@ -182,11 +200,17 @@ struct SettingsView: View {
         nickname = loaded.nickname ?? ""
         birthLocation = loaded.birthLocation ?? ""
         currentLocation = loaded.currentLocation ?? ""
-        birthTime = loaded.birthTime ?? ""
-        if let date = loaded.birthdate {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd"
-            birthdate = formatter.string(from: date)
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        if let birthdate = loaded.birthdate, let parsed = dateFormatter.date(from: birthdate) {
+            birthdateDate = parsed
+        }
+
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "HH:mm:ss"
+        if let birthTime = loaded.birthTime, let parsed = timeFormatter.date(from: birthTime) {
+            birthTimeDate = parsed
         }
     }
 
@@ -196,14 +220,17 @@ struct SettingsView: View {
         statusMessage = nil
         Task {
             defer { isSaving = false }
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd"
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy-MM-dd"
+            let timeFormatter = DateFormatter()
+            timeFormatter.dateFormat = "HH:mm:ss"
+
             let values = ProfileService.ProfileUpdate(
                 nickname: nickname.isEmpty ? nil : nickname,
                 currentLocation: currentLocation.isEmpty ? nil : currentLocation,
                 birthLocation: birthLocation.isEmpty ? nil : birthLocation,
-                birthdate: birthdate.isEmpty ? nil : formatter.date(from: birthdate),
-                birthTime: birthTime.isEmpty ? nil : birthTime
+                birthdate: dateFormatter.string(from: birthdateDate),
+                birthTime: timeFormatter.string(from: birthTimeDate)
             )
             do {
                 try await ProfileService.update(userId, with: values)

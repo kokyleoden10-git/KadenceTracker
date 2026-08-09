@@ -1,13 +1,16 @@
 import Foundation
 
-/// birth_time is a bare `time` column in Postgres (no date/timezone) — kept
-/// as a String ("HH:mm:ss") rather than Date to avoid timezone-conversion
-/// bugs for a value that isn't a moment in time.
+/// birthdate/birth_time are bare `date`/`time` columns in Postgres (no
+/// timezone, and for birthdate no time-of-day either). Both are kept as
+/// plain strings ("YYYY-MM-DD"/"HH:mm:ss") rather than Date — PostgREST
+/// returns them without a time/timezone component, which Swift's Date
+/// decoder can't parse, and neither value is actually a moment in time
+/// anyway (a birthdate isn't tied to a timezone).
 struct Profile: Codable, Identifiable {
     var id: UUID { userId }
     let userId: UUID
     var nickname: String?
-    var birthdate: Date?
+    var birthdate: String?
     var birthTime: String?
     var birthLocation: String?
     var currentLocation: String?

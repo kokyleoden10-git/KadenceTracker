@@ -1,9 +1,12 @@
 import SwiftUI
 
-/// Spec §11 — personalized title, date + weather blip, rotating quote.
-/// Presentational only; no new tables beyond what auth already added.
+/// Spec §11 header — layout/hierarchy carried over from v1 on request:
+/// small-caps label → big date heading → tracked weather line → status
+/// line → quote in its own card, in that order, rather than v2's original
+/// flat stack of same-weight lines.
 struct HomeHeaderView: View {
     let profile: Profile?
+    let status: String
 
     @State private var weather: WeatherBlip?
     @State private var weatherStatus: String?
@@ -15,41 +18,67 @@ struct HomeHeaderView: View {
         return "Kadence"
     }
 
+    private var dateHeading: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, MMMM d"
+        return formatter.string(from: Date())
+    }
+
     private var quote: Quotes.Quote { Quotes.forToday() }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 10) {
             Text(title)
+                .font(KadenceTheme.bodyFont(12))
+                .fontWeight(.semibold)
+                .tracking(1.4)
+                .textCase(.uppercase)
+                .foregroundStyle(KadenceTheme.textMuted)
+
+            Text(dateHeading)
                 .font(KadenceTheme.displayFont(32))
+                .fontWeight(.bold)
                 .foregroundStyle(KadenceTheme.textPrimary)
 
-            HStack(spacing: 4) {
-                Text(Date(), style: .date)
-                if let weather {
-                    Text("| \(weather.locationLabel) | High \(weather.highF)\u{00B0} \u{00B7} Low \(weather.lowF)\u{00B0} \u{00B7} \(weather.condition)")
-                } else if let weatherStatus {
-                    Text("| \(weatherStatus)")
-                }
-            }
-            .font(KadenceTheme.bodyFont(13))
-            .foregroundStyle(KadenceTheme.textMuted)
-
-            if weather != nil {
-                Text("via \(WeatherService.provider)")
+            if let weather {
+                Text("\(weather.locationLabel.uppercased())  |  HIGH \(weather.highF)\u{00B0} \u{00B7} LOW \(weather.lowF)\u{00B0} \u{00B7} \(weather.condition.uppercased())  \u{00B7}  via \(WeatherService.provider)")
                     .font(KadenceTheme.bodyFont(11))
-                    .foregroundStyle(KadenceTheme.textMuted.opacity(0.7))
+                    .tracking(0.8)
+                    .foregroundStyle(KadenceTheme.textMuted)
+            } else if let weatherStatus {
+                Text(weatherStatus.uppercased())
+                    .font(KadenceTheme.bodyFont(11))
+                    .tracking(0.8)
+                    .foregroundStyle(KadenceTheme.textMuted)
             }
 
-            Text("\u{201C}\(quote.text)\u{201D} \u{2014} \(quote.source)")
-                .font(KadenceTheme.bodyFont(13))
-                .italic()
+            Text(status)
+                .font(KadenceTheme.bodyFont(14))
                 .foregroundStyle(KadenceTheme.textMuted)
+
+            Text("\u{201C}\(quote.text)\u{201D}")
+                .font(KadenceTheme.displayFont(16))
+                .italic()
+                .foregroundStyle(KadenceTheme.textPrimary.opacity(0.9))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(18)
+                .background {
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(
+                            LinearGradient(
+                                colors: [KadenceTheme.surface, KadenceTheme.bg],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(KadenceTheme.piscesSeafoam.opacity(0.15), lineWidth: 1)
+                        )
+                }
                 .padding(.top, 4)
         }
         .task(id: profile?.currentLocation) {
-            // No Settings screen exists yet to set current_location, so
-            // there's nothing actionable to nudge the user toward — just
-            // omit the weather line entirely until that's built.
             guard let location = profile?.currentLocation, !location.isEmpty else {
                 weatherStatus = nil
                 return
@@ -66,6 +95,6 @@ struct HomeHeaderView: View {
 #Preview {
     ZStack {
         KadenceTheme.bg.ignoresSafeArea()
-        HomeHeaderView(profile: nil).padding()
+        HomeHeaderView(profile: nil, status: "No habits yet.").padding()
     }
 }

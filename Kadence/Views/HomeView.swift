@@ -13,11 +13,7 @@ struct HomeView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    HomeHeaderView(profile: profile)
-
-                    Text(status)
-                        .font(KadenceTheme.bodyFont())
-                        .foregroundStyle(KadenceTheme.textMuted)
+                    HomeHeaderView(profile: profile, status: status)
 
                     ForEach(habits) { habit in
                         HStack {
