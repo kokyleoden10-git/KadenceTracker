@@ -71,7 +71,8 @@ create table log_entry (
   tags          text[] check (tags is null or array_length(tags, 1) <= 3),
   break_context text,
   created_at    timestamptz not null default now(),
-  privacy_tier  privacy_tier_type not null default 'normal'
+  privacy_tier  privacy_tier_type not null default 'normal',
+  unique (habit_id, date)
 );
 
 create table reading (

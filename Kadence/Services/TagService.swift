@@ -21,17 +21,33 @@ enum TagService {
             .value
 
         if let existing = matches.first {
+            struct UsageBump: Encodable {
+                let usageCount: Int
+                enum CodingKeys: String, CodingKey { case usageCount = "usage_count" }
+            }
+            // Best-effort — a failed bump shouldn't block resolving the tag
+            // itself, it just means autosuggest ranking is slightly stale.
+            try? await SupabaseService.shared.client
+                .from("tag")
+                .update(UsageBump(usageCount: existing.usageCount + 1))
+                .eq("id", value: existing.id)
+                .execute()
             return existing
         }
 
         struct NewTag: Encodable {
             let canonical: String
             let display: String
+            let usageCount: Int
+            enum CodingKeys: String, CodingKey {
+                case canonical, display
+                case usageCount = "usage_count"
+            }
         }
 
         let inserted: [Tag] = try await SupabaseService.shared.client
             .from("tag")
-            .insert(NewTag(canonical: canonical, display: titleCase(canonical)), returning: .representation)
+            .insert(NewTag(canonical: canonical, display: titleCase(canonical), usageCount: 1), returning: .representation)
             .select()
             .execute()
             .value
