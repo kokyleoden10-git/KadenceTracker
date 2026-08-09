@@ -55,7 +55,7 @@ struct HomeHeaderView: View {
                 .foregroundStyle(KadenceTheme.textMuted)
 
             Text("\u{201C}\(quote.text)\u{201D}")
-                .font(KadenceTheme.displayFont(16))
+                .font(KadenceTheme.bodyFont(15))
                 .italic()
                 .foregroundStyle(KadenceTheme.textPrimary.opacity(0.9))
                 .frame(maxWidth: .infinity, alignment: .leading)

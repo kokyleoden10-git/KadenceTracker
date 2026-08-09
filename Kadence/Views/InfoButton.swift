@@ -18,6 +18,7 @@ struct InfoButton: View {
             Text(text)
                 .font(KadenceTheme.bodyFont(13))
                 .foregroundStyle(KadenceTheme.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding()
                 .frame(maxWidth: 260)
                 .background(KadenceTheme.surface)
