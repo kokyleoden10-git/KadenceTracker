@@ -114,6 +114,11 @@ struct ManageHabitsView: View {
             activeHabits = try await activeTask
             archivedHabits = try await archivedTask
             status = ""
+        } catch is CancellationError {
+            // This view's .task gets restarted when a nested sheet (the
+            // habit edit form) dismisses, cancelling whichever load() was
+            // already in flight — a newer one already ran and is reflected
+            // in the list, so this isn't a real failure to report.
         } catch {
             status = "Couldn't load: \(error.localizedDescription)"
         }

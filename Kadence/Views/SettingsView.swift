@@ -30,6 +30,7 @@ struct SettingsView: View {
     @State private var isResetting = false
 
     @AppStorage("permanentDeletionEnabled") private var permanentDeletionEnabled = false
+    @State private var isConfirmingEnableDelete = false
 
     var body: some View {
         ScrollView {
@@ -183,7 +184,16 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeader("Danger Zone")
 
-            Toggle(isOn: $permanentDeletionEnabled) {
+            Toggle(isOn: Binding(
+                get: { permanentDeletionEnabled },
+                set: { newValue in
+                    if newValue {
+                        isConfirmingEnableDelete = true
+                    } else {
+                        permanentDeletionEnabled = false
+                    }
+                }
+            )) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Allow permanently deleting habits")
                         .font(KadenceTheme.bodyFont(14))
@@ -194,6 +204,14 @@ struct SettingsView: View {
                 }
             }
             .tint(KadenceTheme.ariesEmber)
+            .confirmationDialog(
+                "Turning this on lets you permanently delete a habit from its edit screen. Deleting a habit also destroys every entry you've ever logged for it — there's no undo and no backup copy.",
+                isPresented: $isConfirmingEnableDelete,
+                titleVisibility: .visible
+            ) {
+                Button("Enable", role: .destructive) { permanentDeletionEnabled = true }
+                Button("Cancel", role: .cancel) {}
+            }
 
             Button("Sign Out") {
                 Task { try? await AuthService.shared.signOut() }

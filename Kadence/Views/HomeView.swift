@@ -192,6 +192,10 @@ struct HomeView: View {
             let entries = try await entriesTask
             logEntries = Dictionary(uniqueKeysWithValues: entries.map { ($0.habitId, $0) })
             status = ""
+        } catch is CancellationError {
+            // A superseded reload (e.g. this view's .task restarting when a
+            // sheet dismisses) isn't a real failure — a newer load() already
+            // reflects the correct state.
         } catch {
             status = "Couldn't load data: \(error.localizedDescription)"
         }
