@@ -1,3 +1,4 @@
+import SwiftData
 import SwiftUI
 
 /// Replaces streaks (Cosmic Container spec §2). A missed day is a low
@@ -5,44 +6,36 @@ import SwiftUI
 /// best-run, no red.
 ///
 /// The X axis is the lunar cycle rather than "day 1 to 30" (Analytics spec
-/// §2), so the shape reads against the moon instead of against an
-/// arbitrary window start. Background blocks tint by the element of the
-/// moon's sign, giving the "blue behind water-sign days" context.
+/// §2). 30 calendar days is almost exactly one synodic month (29.53), so
+/// the window tiles the axis roughly once; where two calendar days land on
+/// the same lunar day their volumes average — which is also the behaviour
+/// wanted later, when several cycles of history fold onto this same axis.
 ///
-/// On the axis wrap: 30 calendar days is almost exactly one synodic month
-/// (29.53), so the window tiles the axis roughly once. Where two calendar
-/// days land on the same lunar day, their volumes are averaged — which is
-/// also precisely the behaviour wanted later, when several cycles of
-/// history fold onto this same axis to expose a real lunar pattern.
+/// Background blocks mark the lunar days when the transiting moon is in a
+/// sign the natal chart actually occupies, rather than tinting every sign.
+/// That keeps the background sparse and makes it mean something: the
+/// blocks are the closest thing to a real transit the app can compute
+/// without an ephemeris.
 struct TidesView: View {
-    enum Treatment: String, CaseIterable {
-        case table = "Table"
-        case water = "Water"
-    }
-
     private static let windowLength = 30
     private static let lunarBins = 30
 
-    /// Cycles of history before a lunar correlation could mean anything.
-    /// Lunar rhythm has to be separated from the weekly rhythm habits
-    /// already have, and that takes several full cycles — six is the floor,
-    /// and v3's spec says a year for anything involving tarot suits.
+    /// Cycles of history before a lunar reading could mean anything. Lunar
+    /// rhythm has to be separated from the weekly rhythm habits already
+    /// have, and that takes several full cycles — six is the floor.
     private static let cyclesNeededForCorrelation = 6
 
-    @AppStorage("tidesTreatment") private var treatmentRaw = Treatment.table.rawValue
-    private var treatment: Treatment { Treatment(rawValue: treatmentRaw) ?? .table }
+    @Query(sort: \NatalChart.createdAt) private var charts: [NatalChart]
+    private var chart: NatalChart? { charts.first }
 
     @State private var bins: [LunarBin] = []
     @State private var observedDays = 0
-    /// Distinct logged days across *all* history, and the span they cover —
-    /// the 30-day window alone can't project how long until there's enough
-    /// data to say anything.
     @State private var lifetimeLoggedDays = 0
     @State private var lifetimeSpanDays = 0
     @State private var status = "Loading\u{2026}"
 
-    /// TEMPORARY scaffolding for choosing a treatment — in-memory only,
-    /// never written. Delete once a treatment is picked.
+    /// Still here only because there isn't enough real history to see the
+    /// wave at all yet. In-memory, never written. Delete once there is.
     @State private var showSample = false
 
     struct LunarBin: Identifiable {
@@ -58,18 +51,29 @@ struct TidesView: View {
     private var total: Double { bins.reduce(0) { $0 + $1.volume } }
     private var restedDays: Int { bins.filter { $0.hasData && $0.volume == 0 }.count }
 
+    /// Which natal bodies sit in each sign, so a transiting moon can be
+    /// reported as crossing something specific.
+    private var occupants: [ZodiacSign: [String]] {
+        guard let chart else { return [:] }
+        var map: [ZodiacSign: [String]] = [:]
+        let named: [(String, ZodiacSign)] = [
+            ("Sun", chart.sun), ("Moon", chart.moon), ("Mercury", chart.mercury),
+            ("Venus", chart.venus), ("Mars", chart.mars), ("Jupiter", chart.jupiter),
+            ("Saturn", chart.saturn), ("Uranus", chart.uranus), ("Neptune", chart.neptune),
+            ("Pluto", chart.pluto), ("Ascendant", chart.ascendant), ("Midheaven", chart.midheaven),
+        ]
+        for (name, sign) in named {
+            map[sign, default: []].append(name)
+        }
+        return map
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 22) {
                     header
-
-                    Picker("Treatment", selection: $treatmentRaw) {
-                        ForEach(Treatment.allCases, id: \.self) { option in
-                            Text(option.rawValue).tag(option.rawValue)
-                        }
-                    }
-                    .pickerStyle(.segmented)
+                    moonContext
 
                     Toggle(isOn: $showSample) {
                         Text("Show sample shape")
@@ -92,8 +96,9 @@ struct TidesView: View {
                                 .tracking(1.2)
                                 .foregroundStyle(KadenceTheme.ariesEmber)
                         }
-                        chart
+                        chartBody
                         phaseAxis
+                        crossings
                         insights
                     }
                 }
@@ -116,17 +121,51 @@ struct TidesView: View {
             Text("Across the lunar cycle")
                 .font(KadenceTheme.displayFont(28))
                 .foregroundStyle(KadenceTheme.textPrimary)
-            Text("Today \u{00B7} lunar day \(Int(MoonService.lunarAge(Date())) + 1) \u{00B7} \(MoonService.phase(Date()).rawValue) \u{00B7} moon in \(MoonService.sign(Date()).displayName)")
-                .font(KadenceTheme.bodyFont(12))
-                .foregroundStyle(KadenceTheme.textMuted)
         }
+    }
+
+    /// Today's sky, stated plainly — phase, sign, element, and whether the
+    /// moon is currently crossing anything of yours.
+    private var moonContext: some View {
+        let today = Date()
+        let sign = MoonService.sign(today)
+        let signElement = element(of: sign)
+        let lunarDay = Int(MoonService.lunarAge(today)) + 1
+        let crossing = occupants[sign] ?? []
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                MoonPhaseGlyph(illumination: MoonService.illumination(today))
+                    .frame(width: 26, height: 26)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(MoonService.phase(today).rawValue) \u{00B7} lunar day \(lunarDay)")
+                        .font(KadenceTheme.bodyFontSemibold(14))
+                        .foregroundStyle(KadenceTheme.textPrimary)
+                    Text("Moon in \(sign.displayName) \u{00B7} \(signElement.displayName)")
+                        .font(KadenceTheme.bodyFont(12))
+                        .foregroundStyle(KadenceTheme.textMuted)
+                }
+            }
+
+            if !crossing.isEmpty {
+                Text("Crossing your \(list(crossing)).")
+                    .font(KadenceTheme.bodyFont(12))
+                    .foregroundStyle(tint(for: sign, opacity: 1))
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if chart == nil {
+                Text("Set up your chart in Draw to see what the moon is crossing.")
+                    .font(KadenceTheme.bodyFont(12))
+                    .foregroundStyle(KadenceTheme.textMuted)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(KadenceTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     // MARK: - Empty state
 
-    /// No chart, no tint blocks, no gradient — with nothing logged those
-    /// render as a murky striped rectangle that looks broken. Just the
-    /// shape of a tide and a line telling you what to do about it.
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 18) {
             TideGlyph()
@@ -149,46 +188,53 @@ struct TidesView: View {
 
     // MARK: - Chart
 
-    private var chart: some View {
+    private var chartBody: some View {
         GeometryReader { proxy in
             ZStack(alignment: .bottomLeading) {
-                moonSignBlocks(in: proxy.size)
+                natalCrossingBlocks(in: proxy.size)
                 quarterMarkers(in: proxy.size)
-
-                switch treatment {
-                case .table: tableMarks(in: proxy.size)
-                case .water: waterMarks(in: proxy.size)
-                }
+                waterMarks(in: proxy.size)
             }
         }
         .frame(height: 170)
     }
 
-    /// Element of the moon's sign, tinted behind the chart — water reads
-    /// blue-green, fire warm, and so on (Analytics spec §2).
-    private func moonSignBlocks(in size: CGSize) -> some View {
+    /// Only signs the chart occupies get a block, weighted by how much sits
+    /// there — so a stellium reads as a broad band and an empty sign as
+    /// plain background. Replaces tinting all twelve, which turned the
+    /// backdrop into muddy stripes.
+    private func natalCrossingBlocks(in size: CGSize) -> some View {
         let binWidth = size.width / CGFloat(Self.lunarBins)
         return ForEach(bins) { bin in
-            Rectangle()
-                .fill(tint(for: bin.moonSign))
-                .frame(width: binWidth, height: size.height)
-                .offset(x: CGFloat(bin.lunarDay) * binWidth)
+            let count = occupants[bin.moonSign]?.count ?? 0
+            if count > 0 {
+                Rectangle()
+                    .fill(tint(for: bin.moonSign, opacity: opacity(forOccupants: count)))
+                    .frame(width: binWidth, height: size.height)
+                    .offset(x: CGFloat(bin.lunarDay) * binWidth)
+            }
         }
     }
 
-    private func tint(for sign: ZodiacSign) -> Color {
+    private func opacity(forOccupants count: Int) -> Double {
+        switch count {
+        case 1: return 0.10
+        case 2: return 0.15
+        default: return 0.22
+        }
+    }
+
+    private func tint(for sign: ZodiacSign, opacity: Double) -> Color {
         switch element(of: sign) {
-        case .water: return KadenceTheme.aquariusIce.opacity(0.10)
-        case .fire: return KadenceTheme.ariesEmber.opacity(0.08)
-        case .air: return KadenceTheme.sagittariusIndigo.opacity(0.09)
-        case .earth: return KadenceTheme.capricornBronze.opacity(0.08)
+        case .water: return KadenceTheme.piscesTeal.opacity(opacity)
+        case .fire: return KadenceTheme.ariesEmber.opacity(opacity)
+        case .air: return KadenceTheme.aquariusIce.opacity(opacity)
+        case .earth: return KadenceTheme.capricornBronze.opacity(opacity)
         }
     }
 
     private func quarterMarkers(in size: CGSize) -> some View {
-        // New / First Quarter / Full / Last Quarter, at cycle fractions.
-        let fractions: [Double] = [0, 0.25, 0.5, 0.75]
-        return ForEach(fractions, id: \.self) { fraction in
+        ForEach([0.0, 0.25, 0.5, 0.75], id: \.self) { fraction in
             Rectangle()
                 .fill(KadenceTheme.textMuted.opacity(0.18))
                 .frame(width: 1, height: size.height)
@@ -196,40 +242,21 @@ struct TidesView: View {
         }
     }
 
-    private func tableMarks(in size: CGSize) -> some View {
-        let binWidth = size.width / CGFloat(Self.lunarBins)
-        return ForEach(bins) { bin in
-            Rectangle()
-                .fill(bin.volume > 0 ? KadenceTheme.piscesTeal : KadenceTheme.textMuted.opacity(0.22))
-                .frame(
-                    width: max(binWidth - 1.5, 1),
-                    height: max(size.height * (bin.volume / peak), bin.hasData ? 1 : 0)
-                )
-                .offset(x: CGFloat(bin.lunarDay) * binWidth)
-        }
-    }
-
+    /// Flat translucent fill rather than a gradient ramp — the background
+    /// blocks are what should carry meaning here, and a gradient competed
+    /// with them.
     private func waterMarks(in size: CGSize) -> some View {
         let points = wavePoints(in: size)
         return ZStack {
             smoothPath(through: points, closingIn: size)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            KadenceTheme.piscesSeafoam.opacity(0.45),
-                            KadenceTheme.piscesTeal.opacity(0.05),
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
+                .fill(KadenceTheme.piscesSeafoam.opacity(0.16))
             smoothPath(through: points, closingIn: nil)
                 .stroke(KadenceTheme.piscesSeafoam, style: StrokeStyle(lineWidth: 2, lineCap: .round))
         }
     }
 
-    /// Only bins with observations become vertices — an unobserved lunar
-    /// day shouldn't be drawn as a zero, which would fabricate a trough.
+    /// Only observed bins become vertices — an unobserved lunar day must
+    /// not be drawn as a zero, which would fabricate a trough.
     private func wavePoints(in size: CGSize) -> [CGPoint] {
         let binWidth = size.width / CGFloat(Self.lunarBins)
         return bins.filter(\.hasData).map { bin in
@@ -277,12 +304,55 @@ struct TidesView: View {
         .foregroundStyle(KadenceTheme.textMuted)
     }
 
+    /// Astronomy plus the chart — no behavioural claim, so this needs no
+    /// data threshold. It's what the shaded blocks mean, in words.
+    private var crossings: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(crossingRuns, id: \.label) { run in
+                HStack(alignment: .top, spacing: 6) {
+                    Rectangle()
+                        .fill(tint(for: run.sign, opacity: 1))
+                        .frame(width: 3, height: 12)
+                        .padding(.top, 2)
+                    Text(run.label)
+                        .font(KadenceTheme.bodyFont(11))
+                        .foregroundStyle(KadenceTheme.textMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private struct CrossingRun {
+        let sign: ZodiacSign
+        let label: String
+    }
+
+    /// Consecutive lunar days sharing an occupied sign, collapsed into one
+    /// entry — the moon spends ~2.3 days per sign, so per-day rows would
+    /// just repeat.
+    private var crossingRuns: [CrossingRun] {
+        var runs: [CrossingRun] = []
+        var index = 0
+        while index < bins.count {
+            let sign = bins[index].moonSign
+            var end = index
+            while end + 1 < bins.count, bins[end + 1].moonSign == sign { end += 1 }
+
+            if let bodies = occupants[sign], !bodies.isEmpty {
+                let span = index == end ? "Day \(index + 1)" : "Days \(index + 1)\u{2013}\(end + 1)"
+                runs.append(CrossingRun(
+                    sign: sign,
+                    label: "\(span) \u{00B7} moon in \(sign.displayName) \u{00B7} your \(list(bodies))"
+                ))
+            }
+            index = end + 1
+        }
+        return runs
+    }
+
     // MARK: - Insights
 
-    /// Plain counts are always shown — they're facts, not claims. Anything
-    /// that invites reading a pattern is withheld entirely until there's
-    /// enough history for it to mean something, rather than shown early
-    /// with a caveat: a caveated number still gets believed.
     private var insights: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("\(Int(total.rounded())) logged \u{00B7} \(observedDays) days observed \u{00B7} \(restedDays) rested")
@@ -321,8 +391,6 @@ struct TidesView: View {
         }
     }
 
-    /// States the requirement and projects a date from the actual logging
-    /// rate, so the wait is a known quantity rather than an indefinite one.
     private var waitingDescription: String {
         let neededDays = Int((Double(Self.cyclesNeededForCorrelation) * MoonService.synodicMonth).rounded())
         let remaining = max(neededDays - lifetimeLoggedDays, 0)
@@ -332,8 +400,7 @@ struct TidesView: View {
         }
 
         let rate = min(max(Double(lifetimeLoggedDays) / Double(lifetimeSpanDays), 0.01), 1)
-        let projectedDays = Double(remaining) / rate
-        return "\(lifetimeLoggedDays) of about \(neededDays) logged days \u{2014} six lunar cycles, enough to tell a moon rhythm from an ordinary weekly one. At your pace so far, roughly \(humanDuration(projectedDays)) to go."
+        return "\(lifetimeLoggedDays) of about \(neededDays) logged days \u{2014} six lunar cycles, enough to tell a moon rhythm from an ordinary weekly one. At your pace so far, roughly \(humanDuration(Double(remaining) / rate)) to go."
     }
 
     private func humanDuration(_ days: Double) -> String {
@@ -354,8 +421,6 @@ struct TidesView: View {
         let phaseName = MoonService.phase(dateForLunarDay(fullest.lunarDay)).rawValue
         lines.append("Fullest so far: lunar day \(fullest.lunarDay + 1) (\(phaseName.lowercased())).")
 
-        // Waxing vs waning halves, with counts attached so the reader can
-        // see how thin the evidence is.
         let waxing = bins.filter { $0.hasData && $0.lunarDay < Self.lunarBins / 2 }
         let waning = bins.filter { $0.hasData && $0.lunarDay >= Self.lunarBins / 2 }
         if !waxing.isEmpty, !waning.isEmpty {
@@ -366,22 +431,17 @@ struct TidesView: View {
                 waxingMean, waxing.count, waningMean, waning.count
             ))
         }
-
-        let waterDays = bins.filter { $0.hasData && element(of: $0.moonSign) == .water }
-        if !waterDays.isEmpty {
-            let mean = waterDays.reduce(0) { $0 + $1.volume } / Double(waterDays.count)
-            lines.append(String(
-                format: "Water-sign moon days averaged %.1f across %d days.",
-                mean, waterDays.count
-            ))
-        }
         return lines
+    }
+
+    private func list(_ items: [String]) -> String {
+        guard items.count > 1 else { return items.first ?? "" }
+        return items.dropLast().joined(separator: ", ") + " and " + items[items.count - 1]
     }
 
     private func dateForLunarDay(_ lunarDay: Int) -> Date {
         let today = Calendar.current.startOfDay(for: Date())
-        let todayLunarDay = Int(MoonService.lunarAge(today))
-        let delta = lunarDay - todayLunarDay
+        let delta = lunarDay - Int(MoonService.lunarAge(today))
         return Calendar.current.date(byAdding: .day, value: delta, to: today) ?? today
     }
 
@@ -395,10 +455,9 @@ struct TidesView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
 
-        // Completions drive the volume, but *any* row makes a day observed —
-        // a day where everything was marked not-done is a real, deliberate
-        // low tide, and must not vanish from the denominator. Without that
-        // distinction "rested" would always read 0.
+        // Completions drive volume, but *any* row makes a day observed — a
+        // day where everything was marked not-done is a deliberate low
+        // tide and must not vanish from the denominator.
         var completions: [String: Int] = [:]
         var observedDates: Set<String> = []
 
@@ -423,14 +482,11 @@ struct TidesView: View {
                     }
                 }
 
-                // Lifetime figures come from all history, not this window —
-                // the projection needs the real logging rate.
                 let allDates = try await LogEntryService.fetchAllDates()
                 let distinct = Set(allDates)
                 lifetimeLoggedDays = distinct.count
                 if let earliest = distinct.min(), let earliestDate = formatter.date(from: earliest) {
-                    let span = calendar.dateComponents([.day], from: earliestDate, to: today).day ?? 0
-                    lifetimeSpanDays = max(span + 1, 1)
+                    lifetimeSpanDays = max((calendar.dateComponents([.day], from: earliestDate, to: today).day ?? 0) + 1, 1)
                 } else {
                     lifetimeSpanDays = 0
                 }
@@ -442,15 +498,13 @@ struct TidesView: View {
             }
         }
 
-        // Fold calendar days onto lunar days, averaging any collisions.
         var totals: [Int: (sum: Int, days: Int)] = [:]
         var observed = 0
         for offset in 0..<Self.windowLength {
             guard let date = calendar.date(byAdding: .day, value: offset, to: start) else { continue }
             let key = formatter.string(from: date)
-            // Days with no rows at all are skipped rather than counted as
-            // rested — we can't tell "chose not to" from "wasn't using the
-            // app yet", and guessing would inflate the rested count.
+            // Days with no rows are skipped, not counted as rested — we
+            // can't tell "chose not to" from "wasn't using the app yet".
             guard observedDates.contains(key) else { continue }
             let bin = min(Int(MoonService.lunarAge(date)), Self.lunarBins - 1)
             let existing = totals[bin] ?? (0, 0)
@@ -472,8 +526,8 @@ struct TidesView: View {
     }
 }
 
-/// Two offset swells, drawn rather than illustrated — the empty state
-/// should read as the shape a tide makes, not as decoration.
+/// Two offset swells — the empty state should read as the shape a tide
+/// makes, not as decoration.
 private struct TideGlyph: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
@@ -481,15 +535,39 @@ private struct TideGlyph: Shape {
             let baseline = rect.midY + CGFloat(index) * rect.height * 0.22
             let amplitude = rect.height * amplitudeScale
             path.move(to: CGPoint(x: rect.minX, y: baseline))
-            let steps = 60
-            for step in 1...steps {
-                let progress = CGFloat(step) / CGFloat(steps)
-                let x = rect.minX + rect.width * progress
-                let y = baseline - sin(progress * .pi * 2 + CGFloat(index) * 0.8) * amplitude / 2
-                path.addLine(to: CGPoint(x: x, y: y))
+            for step in 1...60 {
+                let progress = CGFloat(step) / 60
+                path.addLine(to: CGPoint(
+                    x: rect.minX + rect.width * progress,
+                    y: baseline - sin(progress * .pi * 2 + CGFloat(index) * 0.8) * amplitude / 2
+                ))
             }
         }
         return path
+    }
+}
+
+/// Illuminated fraction as a simple disc — a terminator drawn with a
+/// circle mask, no imagery.
+private struct MoonPhaseGlyph: View {
+    let illumination: Double
+
+    var body: some View {
+        GeometryReader { proxy in
+            let size = min(proxy.size.width, proxy.size.height)
+            ZStack {
+                Circle()
+                    .stroke(KadenceTheme.textMuted.opacity(0.5), lineWidth: 1)
+                Circle()
+                    .fill(KadenceTheme.piscesSeafoam.opacity(0.85))
+                    .mask(
+                        Rectangle()
+                            .frame(width: size * illumination, height: size)
+                            .offset(x: -size * (1 - illumination) / 2)
+                    )
+            }
+            .frame(width: size, height: size)
+        }
     }
 }
 
