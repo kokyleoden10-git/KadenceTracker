@@ -63,7 +63,7 @@ struct DrawView: View {
             }
         }
         .sheet(isPresented: $isSettingUpChart) {
-            NatalChartFormView(onSaved: {})
+            NatalChartFormView(existingChart: chart, onSaved: {})
         }
         .sheet(isPresented: $isPickingCard) {
             CardPickerView(tradition: selectedDeck?.tradition ?? .rws) { card in

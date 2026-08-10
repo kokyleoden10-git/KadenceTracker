@@ -1,11 +1,19 @@
 import SwiftData
 import SwiftUI
 
-/// One-time entry of a chart the user already has (from a prior reading,
-/// astro.com, etc.) rather than computing one — see TarotModels.swift's
-/// NatalChart doc comment for why. Sign-only, no degrees: that's all the
-/// resonance engine's scoring actually needs.
+/// Entry of a chart the user already has (from a prior reading, astro.com,
+/// etc.) rather than computing one — see TarotModels.swift's NatalChart
+/// doc comment for why. Sign-only, no degrees: that's all the resonance
+/// engine's scoring actually needs.
+///
+/// Acts as a singleton editor: if `existingChart` is passed in, every
+/// field is pre-populated from it and Save updates that same record in
+/// place. Without this, reopening the form always showed Aries defaults
+/// and re-saving created a second, blank NatalChart — with two records
+/// and no explicit sort on the `@Query` in DrawView, which one counted as
+/// "the" chart was unpredictable, which is exactly the bug this fixes.
 struct NatalChartFormView: View {
+    var existingChart: NatalChart?
     var onSaved: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -74,6 +82,7 @@ struct NatalChartFormView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .onAppear(perform: populateIfEditing)
     }
 
     private func signRow(_ label: String, _ selection: Binding<ZodiacSign>) -> some View {
@@ -107,16 +116,50 @@ struct NatalChartFormView: View {
         }
     }
 
+    private func populateIfEditing() {
+        guard let chart = existingChart else { return }
+        sun = chart.sun
+        moon = chart.moon
+        mercury = chart.mercury
+        venus = chart.venus
+        mars = chart.mars
+        jupiter = chart.jupiter
+        saturn = chart.saturn
+        uranus = chart.uranus
+        neptune = chart.neptune
+        pluto = chart.pluto
+        ascendant = chart.ascendant
+        midheaven = chart.midheaven
+        birthDateDescription = chart.birthDateDescription ?? ""
+        birthTimeDescription = chart.birthTimeDescription ?? ""
+        birthLocationDescription = chart.birthLocationDescription ?? ""
+    }
+
     private func save() {
-        let chart = NatalChart(
+        let chart = existingChart ?? NatalChart(
             sun: sun, moon: moon, mercury: mercury, venus: venus, mars: mars,
             jupiter: jupiter, saturn: saturn, uranus: uranus, neptune: neptune,
             pluto: pluto, ascendant: ascendant, midheaven: midheaven
         )
+        chart.sun = sun
+        chart.moon = moon
+        chart.mercury = mercury
+        chart.venus = venus
+        chart.mars = mars
+        chart.jupiter = jupiter
+        chart.saturn = saturn
+        chart.uranus = uranus
+        chart.neptune = neptune
+        chart.pluto = pluto
+        chart.ascendant = ascendant
+        chart.midheaven = midheaven
         chart.birthDateDescription = birthDateDescription.isEmpty ? nil : birthDateDescription
         chart.birthTimeDescription = birthTimeDescription.isEmpty ? nil : birthTimeDescription
         chart.birthLocationDescription = birthLocationDescription.isEmpty ? nil : birthLocationDescription
-        modelContext.insert(chart)
+
+        if existingChart == nil {
+            modelContext.insert(chart)
+        }
         onSaved()
         dismiss()
     }
