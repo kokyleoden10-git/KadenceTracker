@@ -34,6 +34,11 @@ struct TidesView: View {
 
     @State private var bins: [LunarBin] = []
     @State private var observedDays = 0
+    /// Distinct logged days across *all* history, and the span they cover —
+    /// the 30-day window alone can't project how long until there's enough
+    /// data to say anything.
+    @State private var lifetimeLoggedDays = 0
+    @State private var lifetimeSpanDays = 0
     @State private var status = "Loading\u{2026}"
 
     /// TEMPORARY scaffolding for choosing a treatment — in-memory only,
@@ -52,7 +57,6 @@ struct TidesView: View {
     private var peak: Double { max(bins.map(\.volume).max() ?? 0, 1) }
     private var total: Double { bins.reduce(0) { $0 + $1.volume } }
     private var restedDays: Int { bins.filter { $0.hasData && $0.volume == 0 }.count }
-    private var cyclesObserved: Double { Double(observedDays) / MoonService.synodicMonth }
 
     var body: some View {
         NavigationStack {
@@ -79,6 +83,8 @@ struct TidesView: View {
                         Text(status)
                             .font(KadenceTheme.bodyFont(14))
                             .foregroundStyle(KadenceTheme.textMuted)
+                    } else if observedDays == 0 {
+                        emptyState
                     } else {
                         if showSample {
                             Text("SAMPLE \u{2014} NOT YOUR DATA")
@@ -114,6 +120,31 @@ struct TidesView: View {
                 .font(KadenceTheme.bodyFont(12))
                 .foregroundStyle(KadenceTheme.textMuted)
         }
+    }
+
+    // MARK: - Empty state
+
+    /// No chart, no tint blocks, no gradient — with nothing logged those
+    /// render as a murky striped rectangle that looks broken. Just the
+    /// shape of a tide and a line telling you what to do about it.
+    private var emptyState: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            TideGlyph()
+                .stroke(KadenceTheme.piscesSeafoam.opacity(0.55), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .frame(height: 90)
+                .frame(maxWidth: .infinity)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("No tide yet.")
+                    .font(KadenceTheme.displayFont(20))
+                    .foregroundStyle(KadenceTheme.textPrimary)
+                Text("Log a few days and the shape starts to show. Nothing here counts against you.")
+                    .font(KadenceTheme.bodyFont(13))
+                    .foregroundStyle(KadenceTheme.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 12)
     }
 
     // MARK: - Chart
@@ -248,23 +279,69 @@ struct TidesView: View {
 
     // MARK: - Insights
 
-    /// Descriptive only, and every line carries its sample size. Nothing
-    /// here asserts a correlation, because at this volume none would be
-    /// trustworthy — see `correlationGate`.
+    /// Plain counts are always shown — they're facts, not claims. Anything
+    /// that invites reading a pattern is withheld entirely until there's
+    /// enough history for it to mean something, rather than shown early
+    /// with a caveat: a caveated number still gets believed.
     private var insights: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("\(Int(total.rounded())) logged \u{00B7} \(observedDays) days observed \u{00B7} \(restedDays) rested")
                 .font(KadenceTheme.bodyFont(15))
                 .foregroundStyle(KadenceTheme.textPrimary)
 
-            ForEach(observations, id: \.self) { line in
-                Text(line)
+            patternsSection
+        }
+    }
+
+    private var hasEnoughForPatterns: Bool {
+        Double(lifetimeLoggedDays) >= Double(Self.cyclesNeededForCorrelation) * MoonService.synodicMonth
+    }
+
+    private var patternsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Divider().overlay(KadenceTheme.textMuted.opacity(0.2))
+            Text("PATTERNS")
+                .font(KadenceTheme.bodyFontSemibold(10))
+                .tracking(1.2)
+                .foregroundStyle(KadenceTheme.textMuted)
+
+            if hasEnoughForPatterns {
+                ForEach(observations, id: \.self) { line in
+                    Text(line)
+                        .font(KadenceTheme.bodyFont(12))
+                        .foregroundStyle(KadenceTheme.textMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                Text(waitingDescription)
                     .font(KadenceTheme.bodyFont(12))
                     .foregroundStyle(KadenceTheme.textMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
 
-            correlationGate
+    /// States the requirement and projects a date from the actual logging
+    /// rate, so the wait is a known quantity rather than an indefinite one.
+    private var waitingDescription: String {
+        let neededDays = Int((Double(Self.cyclesNeededForCorrelation) * MoonService.synodicMonth).rounded())
+        let remaining = max(neededDays - lifetimeLoggedDays, 0)
+
+        guard lifetimeLoggedDays > 0, lifetimeSpanDays > 0 else {
+            return "Readings need about \(neededDays) logged days \u{2014} six lunar cycles, enough to tell a moon rhythm from an ordinary weekly one. Keep logging and this will estimate when."
+        }
+
+        let rate = min(max(Double(lifetimeLoggedDays) / Double(lifetimeSpanDays), 0.01), 1)
+        let projectedDays = Double(remaining) / rate
+        return "\(lifetimeLoggedDays) of about \(neededDays) logged days \u{2014} six lunar cycles, enough to tell a moon rhythm from an ordinary weekly one. At your pace so far, roughly \(humanDuration(projectedDays)) to go."
+    }
+
+    private func humanDuration(_ days: Double) -> String {
+        switch days {
+        case ..<14: return "\(max(Int(days.rounded()), 1)) days"
+        case ..<60: return "\(Int((days / 7).rounded())) weeks"
+        case ..<550: return "\(max(Int((days / 30.44).rounded()), 2)) months"
+        default: return "over a year"
         }
     }
 
@@ -301,38 +378,6 @@ struct TidesView: View {
         return lines
     }
 
-    /// The honest version of the Analytics spec's §3 engine: rather than
-    /// print a correlation coefficient computed from too little data, show
-    /// how far off having one actually is. This is the same posture as the
-    /// rest of the app — report, don't claim.
-    private var correlationGate: some View {
-        let needed = Double(Self.cyclesNeededForCorrelation)
-        let progress = min(cyclesObserved / needed, 1)
-        return VStack(alignment: .leading, spacing: 6) {
-            Divider().overlay(KadenceTheme.textMuted.opacity(0.2))
-            Text("PATTERNS")
-                .font(KadenceTheme.bodyFontSemibold(10))
-                .tracking(1.2)
-                .foregroundStyle(KadenceTheme.textMuted)
-            if cyclesObserved >= needed {
-                Text("Enough history to start testing whether these differences are real rather than noise.")
-                    .font(KadenceTheme.bodyFont(12))
-                    .foregroundStyle(KadenceTheme.piscesSeafoam)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                ProgressView(value: progress)
-                    .tint(KadenceTheme.piscesTeal)
-                Text(String(
-                    format: "%.1f of %d lunar cycles logged. Below that, a moon-vs-habit correlation can't be told apart from your weekly rhythm, so none is shown.",
-                    cyclesObserved, Self.cyclesNeededForCorrelation
-                ))
-                .font(KadenceTheme.bodyFont(12))
-                .foregroundStyle(KadenceTheme.textMuted)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
     private func dateForLunarDay(_ lunarDay: Int) -> Date {
         let today = Calendar.current.startOfDay(for: Date())
         let todayLunarDay = Int(MoonService.lunarAge(today))
@@ -366,6 +411,8 @@ struct TidesView: View {
                 completions[key] = pattern[offset % pattern.count]
                 observedDates.insert(key)
             }
+            lifetimeLoggedDays = Self.windowLength
+            lifetimeSpanDays = Self.windowLength
         } else {
             do {
                 let entries = try await LogEntryService.fetchRange(from: start, to: today)
@@ -374,6 +421,18 @@ struct TidesView: View {
                     if entry.doneValue > 0 {
                         completions[entry.date, default: 0] += 1
                     }
+                }
+
+                // Lifetime figures come from all history, not this window —
+                // the projection needs the real logging rate.
+                let allDates = try await LogEntryService.fetchAllDates()
+                let distinct = Set(allDates)
+                lifetimeLoggedDays = distinct.count
+                if let earliest = distinct.min(), let earliestDate = formatter.date(from: earliest) {
+                    let span = calendar.dateComponents([.day], from: earliestDate, to: today).day ?? 0
+                    lifetimeSpanDays = max(span + 1, 1)
+                } else {
+                    lifetimeSpanDays = 0
                 }
             } catch is CancellationError {
                 return
@@ -410,6 +469,27 @@ struct TidesView: View {
             )
         }
         status = ""
+    }
+}
+
+/// Two offset swells, drawn rather than illustrated — the empty state
+/// should read as the shape a tide makes, not as decoration.
+private struct TideGlyph: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        for (index, amplitudeScale) in [0.42, 0.24].enumerated() {
+            let baseline = rect.midY + CGFloat(index) * rect.height * 0.22
+            let amplitude = rect.height * amplitudeScale
+            path.move(to: CGPoint(x: rect.minX, y: baseline))
+            let steps = 60
+            for step in 1...steps {
+                let progress = CGFloat(step) / CGFloat(steps)
+                let x = rect.minX + rect.width * progress
+                let y = baseline - sin(progress * .pi * 2 + CGFloat(index) * 0.8) * amplitude / 2
+                path.addLine(to: CGPoint(x: x, y: y))
+            }
+        }
+        return path
     }
 }
 

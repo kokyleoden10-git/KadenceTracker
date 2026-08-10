@@ -14,11 +14,11 @@ struct ContentView: View {
             KadenceTheme.bg.ignoresSafeArea()
 
             TabView {
-                DrawView()
-                    .tabItem { Label("Draw", systemImage: "sparkles") }
-
                 HabitsGatedView { HomeView() }
                     .tabItem { Label("Today", systemImage: "house.fill") }
+
+                DrawView()
+                    .tabItem { Label("Draw", systemImage: "sparkles") }
 
                 HabitsGatedView { TidesView() }
                     .tabItem { Label("Tides", systemImage: "water.waves") }

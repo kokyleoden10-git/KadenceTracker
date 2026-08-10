@@ -40,6 +40,20 @@ enum LogEntryService {
             .value
     }
 
+    /// Just the date column across all history — enough to size how much
+    /// data exists (and how consistently it was logged) without pulling
+    /// full rows.
+    static func fetchAllDates() async throws -> [String] {
+        struct Row: Decodable { let date: String }
+        let rows: [Row] = try await SupabaseService.shared.client
+            .from("log_entry")
+            .select("date")
+            .order("date")
+            .execute()
+            .value
+        return rows.map(\.date)
+    }
+
     struct LogEntryInput: Encodable {
         var habitId: UUID
         var date: String
