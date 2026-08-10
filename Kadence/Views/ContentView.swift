@@ -1,8 +1,6 @@
 import SwiftUI
 
 struct ContentView: View {
-    @ObservedObject private var auth = AuthService.shared
-
     init() {
         let appearance = UITabBarAppearance()
         appearance.configureWithOpaqueBackground()
@@ -15,21 +13,37 @@ struct ContentView: View {
         ZStack {
             KadenceTheme.bg.ignoresSafeArea()
 
-            if auth.isLoading {
-                ProgressView()
-                    .tint(KadenceTheme.textPrimary)
-            } else if auth.session != nil {
-                TabView {
-                    HomeView()
-                        .tabItem { Label("Today", systemImage: "house.fill") }
+            TabView {
+                DrawView()
+                    .tabItem { Label("Draw", systemImage: "sparkles") }
 
-                    SettingsView()
-                        .tabItem { Label("Settings", systemImage: "gearshape.fill") }
-                }
-                .tint(KadenceTheme.piscesTeal)
-            } else {
-                SignInView()
+                HabitsGatedView { HomeView() }
+                    .tabItem { Label("Today", systemImage: "house.fill") }
+
+                HabitsGatedView { SettingsView() }
+                    .tabItem { Label("Settings", systemImage: "gearshape.fill") }
             }
+            .tint(KadenceTheme.piscesTeal)
+        }
+    }
+}
+
+/// Habit tracking (Today/Settings) still requires Supabase auth. Draw
+/// (v3 spec Step 1) deliberately doesn't — it's local-only for now, and
+/// bypassing sign-in there is temporary, to prove the daily card log
+/// survives a week before anything gets wired back up to an account.
+private struct HabitsGatedView<Content: View>: View {
+    @ObservedObject private var auth = AuthService.shared
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        if auth.isLoading {
+            ProgressView()
+                .tint(KadenceTheme.textPrimary)
+        } else if auth.session != nil {
+            content()
+        } else {
+            SignInView()
         }
     }
 }
