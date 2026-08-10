@@ -7,6 +7,6 @@ struct KadenceApp: App {
         WindowGroup {
             ContentView()
         }
-        .modelContainer(for: [Deck.self, Entry.self, Draw.self])
+        .modelContainer(for: [Deck.self, Entry.self, Draw.self, NatalChart.self])
     }
 }

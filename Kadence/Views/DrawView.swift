@@ -1,26 +1,30 @@
 import SwiftData
 import SwiftUI
 
-/// v3 spec, Step 1 — the daily loop. Local-only (SwiftData), no auth, no
-/// astrology, no sync. Same Entry serves both visits: morning creates the
-/// card + line, evening adds the reflection. "Report, don't grade" — no
-/// streaks anywhere in this file, and skipping is a first-class save, not
-/// an error state.
+/// v3 spec, Step 1 + resonance (§Resonance) — the daily loop plus card
+/// attribution against a natal chart. Still local-only (SwiftData), no
+/// auth, no ephemeris — the chart is entered once from data the user
+/// already has (see NatalChartFormView), not computed on-device.
 struct DrawView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Deck.createdAt, order: .reverse) private var decks: [Deck]
     @Query(sort: \Entry.occurredAt, order: .reverse) private var entries: [Entry]
+    @Query private var charts: [NatalChart]
 
     @State private var isCreatingDeck = false
+    @State private var isSettingUpChart = false
+    @State private var isPickingCard = false
     @State private var selectedDeck: Deck?
 
-    @State private var cardName = ""
+    @State private var selectedCard: TarotCard?
     @State private var isReversed = false
     @State private var jumperNames: [String] = []
     @State private var newJumperName = ""
     @State private var morningLine = ""
 
     @State private var eveningReflection = ""
+
+    private var chart: NatalChart? { charts.first }
 
     private var todaysEntry: Entry? {
         entries.first { Calendar.current.isDateInToday($0.occurredAt) }
@@ -58,17 +62,35 @@ struct DrawView: View {
                 selectedDeck = newDeck
             }
         }
+        .sheet(isPresented: $isSettingUpChart) {
+            NatalChartFormView(onSaved: {})
+        }
+        .sheet(isPresented: $isPickingCard) {
+            CardPickerView(tradition: selectedDeck?.tradition ?? .rws) { card in
+                selectedCard = card
+            }
+        }
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("DRAW")
-                .font(KadenceTheme.bodyFontSemibold(12))
-                .tracking(1.4)
-                .foregroundStyle(KadenceTheme.textMuted)
-            Text(Date(), style: .date)
-                .font(KadenceTheme.displayFont(28))
-                .foregroundStyle(KadenceTheme.textPrimary)
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("DRAW")
+                    .font(KadenceTheme.bodyFontSemibold(12))
+                    .tracking(1.4)
+                    .foregroundStyle(KadenceTheme.textMuted)
+                Text(Date(), style: .date)
+                    .font(KadenceTheme.displayFont(28))
+                    .foregroundStyle(KadenceTheme.textPrimary)
+            }
+            Spacer()
+            Button {
+                isSettingUpChart = true
+            } label: {
+                Text(chart == nil ? "Set up chart" : "Chart set")
+                    .font(KadenceTheme.bodyFont(12))
+                    .foregroundStyle(chart == nil ? KadenceTheme.piscesTeal : KadenceTheme.textMuted)
+            }
         }
     }
 
@@ -91,7 +113,22 @@ struct DrawView: View {
         VStack(alignment: .leading, spacing: 18) {
             deckPicker
 
-            labeledField("Which card did you pull?", placeholder: "e.g. The Star, 9 of Cups", text: $cardName)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Which card did you pull?")
+                    .font(KadenceTheme.bodyFont(12))
+                    .foregroundStyle(KadenceTheme.textMuted)
+                Button {
+                    isPickingCard = true
+                } label: {
+                    Text(selectedCard.map { $0.name(for: selectedDeck?.tradition ?? .rws) } ?? "Choose a card")
+                        .font(KadenceTheme.bodyFont(15))
+                        .foregroundStyle(selectedCard == nil ? KadenceTheme.textMuted : KadenceTheme.textPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(10)
+                .background(KadenceTheme.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
 
             if selectedDeck?.usesReversals == true {
                 Toggle(isOn: $isReversed) {
@@ -124,7 +161,7 @@ struct DrawView: View {
     }
 
     private var canSaveMorning: Bool {
-        !cardName.trimmingCharacters(in: .whitespaces).isEmpty && selectedDeck != nil
+        selectedCard != nil && selectedDeck != nil
     }
 
     private var deckPicker: some View {
@@ -212,6 +249,15 @@ struct DrawView: View {
                         .foregroundStyle(KadenceTheme.piscesSeafoam.opacity(0.9))
                         .padding(.top, 4)
                 }
+                // Appears only after the morning line was written and saved
+                // — never before, per spec. Silent when the engine has
+                // nothing worth saying (see ResonanceEngine).
+                if let note = entry.dailyDraw?.resonanceNote {
+                    Text(note)
+                        .font(KadenceTheme.bodyFont(13))
+                        .foregroundStyle(KadenceTheme.piscesTeal)
+                        .padding(.top, 6)
+                }
             }
             .padding(14)
             .background(KadenceTheme.surface)
@@ -258,7 +304,7 @@ struct DrawView: View {
     // MARK: - Actions
 
     private func saveMorning() {
-        guard let deck = selectedDeck else { return }
+        guard let deck = selectedDeck, let card = selectedCard else { return }
         let entry = todaysEntry ?? Entry(occurredAt: Calendar.current.startOfDay(for: Date()))
         if todaysEntry == nil { modelContext.insert(entry) }
 
@@ -267,13 +313,21 @@ struct DrawView: View {
         entry.skipped = false
         entry.updatedAt = Date()
 
-        let daily = Draw(cardName: cardName.trimmingCharacters(in: .whitespaces), role: .daily, reversed: isReversed)
+        let daily = Draw(cardName: card.name(for: deck.tradition), cardID: card.id, role: .daily, reversed: isReversed)
+        if let chart {
+            let result = ResonanceEngine.resonance(for: card, deckTradition: deck.tradition, chart: chart)
+            daily.resonanceTier = result.tier.rawValue
+            daily.resonanceNote = result.note
+        }
         entry.draws.append(daily)
+
+        // Jumpers stay free text for now — resonance for them is deferred,
+        // not wired into this pass's UI.
         for jumper in jumperNames {
             entry.draws.append(Draw(cardName: jumper, role: .jumper))
         }
 
-        cardName = ""
+        selectedCard = nil
         isReversed = false
         jumperNames = []
         morningLine = ""
@@ -294,5 +348,5 @@ struct DrawView: View {
 
 #Preview {
     DrawView()
-        .modelContainer(for: [Deck.self, Entry.self, Draw.self], inMemory: true)
+        .modelContainer(for: [Deck.self, Entry.self, Draw.self, NatalChart.self], inMemory: true)
 }
