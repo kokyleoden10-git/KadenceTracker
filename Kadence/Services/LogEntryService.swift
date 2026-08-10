@@ -27,31 +27,16 @@ enum LogEntryService {
             .value
     }
 
-    /// Inclusive of both endpoints. Used by Tides, which reads a rolling
-    /// 30-day window rather than a single day.
-    static func fetchRange(from start: Date, to end: Date) async throws -> [LogEntry] {
+    /// All history. Tides folds every cycle onto one lunar axis, so it wants
+    /// everything rather than a window — a single user's log is a few
+    /// thousand rows a year, which is well within a single request.
+    static func fetchAll() async throws -> [LogEntry] {
         try await SupabaseService.shared.client
             .from("log_entry")
             .select()
-            .gte("date", value: dateFormatter.string(from: start))
-            .lte("date", value: dateFormatter.string(from: end))
             .order("date")
             .execute()
             .value
-    }
-
-    /// Just the date column across all history — enough to size how much
-    /// data exists (and how consistently it was logged) without pulling
-    /// full rows.
-    static func fetchAllDates() async throws -> [String] {
-        struct Row: Decodable { let date: String }
-        let rows: [Row] = try await SupabaseService.shared.client
-            .from("log_entry")
-            .select("date")
-            .order("date")
-            .execute()
-            .value
-        return rows.map(\.date)
     }
 
     struct LogEntryInput: Encodable {

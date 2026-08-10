@@ -17,8 +17,11 @@ import SwiftUI
 /// blocks are the closest thing to a real transit the app can compute
 /// without an ephemeris.
 struct TidesView: View {
-    private static let windowLength = 30
     private static let lunarBins = 30
+
+    /// Roughly seven months — past the pattern threshold, so the sample
+    /// shows the unlocked state and several cycles folded together.
+    private static let sampleDays = 213
 
     /// Cycles of history before a lunar reading could mean anything. Lunar
     /// rhythm has to be separated from the weekly rhythm habits already
@@ -30,6 +33,7 @@ struct TidesView: View {
 
     @State private var bins: [LunarBin] = []
     @State private var observedDays = 0
+    @State private var restedDayCount = 0
     @State private var lifetimeLoggedDays = 0
     @State private var lifetimeSpanDays = 0
     @State private var status = "Loading\u{2026}"
@@ -48,8 +52,12 @@ struct TidesView: View {
     }
 
     private var peak: Double { max(bins.map(\.volume).max() ?? 0, 1) }
-    private var total: Double { bins.reduce(0) { $0 + $1.volume } }
-    private var restedDays: Int { bins.filter { $0.hasData && $0.volume == 0 }.count }
+
+    /// Cycles of history folded onto the axis — what you're actually
+    /// looking at when a bin averages several days.
+    private var cyclesFolded: Double {
+        Double(observedDays) / MoonService.synodicMonth
+    }
 
     /// Which natal bodies sit in each sign, so a transiting moon can be
     /// reported as crossing something specific.
@@ -121,6 +129,13 @@ struct TidesView: View {
             Text("Across the lunar cycle")
                 .font(KadenceTheme.displayFont(28))
                 .foregroundStyle(KadenceTheme.textPrimary)
+            if observedDays > 0 {
+                Text(cyclesFolded < 1.5
+                     ? "\(observedDays) days logged"
+                     : String(format: "%.1f cycles folded together \u{00B7} %d days logged", cyclesFolded, observedDays))
+                    .font(KadenceTheme.bodyFont(12))
+                    .foregroundStyle(KadenceTheme.textMuted)
+            }
         }
     }
 
@@ -355,7 +370,7 @@ struct TidesView: View {
 
     private var insights: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("\(Int(total.rounded())) logged \u{00B7} \(observedDays) days observed \u{00B7} \(restedDays) rested")
+            Text("\(observedDays) days logged \u{00B7} \(restedDayCount) rested")
                 .font(KadenceTheme.bodyFont(15))
                 .foregroundStyle(KadenceTheme.textPrimary)
 
@@ -426,10 +441,29 @@ struct TidesView: View {
         if !waxing.isEmpty, !waning.isEmpty {
             let waxingMean = waxing.reduce(0) { $0 + $1.volume } / Double(waxing.count)
             let waningMean = waning.reduce(0) { $0 + $1.volume } / Double(waning.count)
+            let waxingDays = waxing.reduce(0) { $0 + $1.observations }
+            let waningDays = waning.reduce(0) { $0 + $1.observations }
             lines.append(String(
                 format: "Waxing days averaged %.1f across %d days; waning %.1f across %d.",
-                waxingMean, waxing.count, waningMean, waning.count
+                waxingMean, waxingDays, waningMean, waningDays
             ))
+        }
+
+        // Which occupied sign coincided with the fullest days. Still
+        // descriptive — it reports what happened, not why.
+        let crossingBins = bins.filter { $0.hasData && !(occupants[$0.moonSign] ?? []).isEmpty }
+        if !crossingBins.isEmpty {
+            let byMean = Dictionary(grouping: crossingBins, by: \.moonSign)
+                .mapValues { group in
+                    group.reduce(0.0) { $0 + $1.volume } / Double(group.count)
+                }
+            if let best = byMean.max(by: { $0.value < $1.value }) {
+                let dayCount = crossingBins.filter { $0.moonSign == best.key }.reduce(0) { $0 + $1.observations }
+                lines.append(String(
+                    format: "Highest with the moon in %@ (your %@): %.1f across %d days.",
+                    best.key.displayName, list(occupants[best.key] ?? []), best.value, dayCount
+                ))
+            }
         }
         return lines
     }
@@ -450,7 +484,6 @@ struct TidesView: View {
     private func load() async {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
-        guard let start = calendar.date(byAdding: .day, value: -(Self.windowLength - 1), to: today) else { return }
 
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
@@ -462,33 +495,30 @@ struct TidesView: View {
         var observedDates: Set<String> = []
 
         if showSample {
-            let pattern = [3, 4, 2, 0, 1, 3, 5, 4, 0, 0, 2, 3, 4, 6, 5, 3,
-                           1, 0, 2, 4, 5, 5, 3, 0, 1, 2, 4, 3, 5, 4]
-            for offset in 0..<Self.windowLength {
-                guard let date = calendar.date(byAdding: .day, value: offset, to: start) else { continue }
+            // Randomised each load, with a fabricated mild lunar lean so the
+            // folded axis has something to show. The lean is invented — do
+            // not read meaning into its shape.
+            for offset in 0..<Self.sampleDays {
+                guard let date = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
                 let key = formatter.string(from: date)
-                completions[key] = pattern[offset % pattern.count]
                 observedDates.insert(key)
+
+                if Double.random(in: 0...1) < 0.12 {
+                    completions[key] = 0
+                    continue
+                }
+                let fraction = MoonService.lunarAge(date) / MoonService.synodicMonth
+                let lean = 1 + 0.45 * sin(2 * .pi * (fraction - 0.25))
+                let value = 3.0 * lean + Double.random(in: -1.4...1.4)
+                completions[key] = max(Int(value.rounded()), 0)
             }
-            lifetimeLoggedDays = Self.windowLength
-            lifetimeSpanDays = Self.windowLength
         } else {
             do {
-                let entries = try await LogEntryService.fetchRange(from: start, to: today)
-                for entry in entries {
+                for entry in try await LogEntryService.fetchAll() {
                     observedDates.insert(entry.date)
                     if entry.doneValue > 0 {
                         completions[entry.date, default: 0] += 1
                     }
-                }
-
-                let allDates = try await LogEntryService.fetchAllDates()
-                let distinct = Set(allDates)
-                lifetimeLoggedDays = distinct.count
-                if let earliest = distinct.min(), let earliestDate = formatter.date(from: earliest) {
-                    lifetimeSpanDays = max((calendar.dateComponents([.day], from: earliestDate, to: today).day ?? 0) + 1, 1)
-                } else {
-                    lifetimeSpanDays = 0
                 }
             } catch is CancellationError {
                 return
@@ -498,21 +528,25 @@ struct TidesView: View {
             }
         }
 
+        // Fold every observed day onto the lunar axis. Bins average across
+        // however many cycles exist, so the shape sharpens with history
+        // instead of being a single arbitrary month.
         var totals: [Int: (sum: Int, days: Int)] = [:]
-        var observed = 0
-        for offset in 0..<Self.windowLength {
-            guard let date = calendar.date(byAdding: .day, value: offset, to: start) else { continue }
-            let key = formatter.string(from: date)
-            // Days with no rows are skipped, not counted as rested — we
-            // can't tell "chose not to" from "wasn't using the app yet".
-            guard observedDates.contains(key) else { continue }
+        for key in observedDates {
+            guard let date = formatter.date(from: key) else { continue }
             let bin = min(Int(MoonService.lunarAge(date)), Self.lunarBins - 1)
             let existing = totals[bin] ?? (0, 0)
             totals[bin] = (existing.sum + (completions[key] ?? 0), existing.days + 1)
-            observed += 1
         }
 
-        observedDays = observed
+        observedDays = observedDates.count
+        restedDayCount = observedDates.filter { (completions[$0] ?? 0) == 0 }.count
+        lifetimeLoggedDays = observedDates.count
+        if let earliest = observedDates.min(), let earliestDate = formatter.date(from: earliest) {
+            lifetimeSpanDays = max((calendar.dateComponents([.day], from: earliestDate, to: today).day ?? 0) + 1, 1)
+        } else {
+            lifetimeSpanDays = 0
+        }
         bins = (0..<Self.lunarBins).map { bin in
             let entry = totals[bin]
             return LunarBin(
