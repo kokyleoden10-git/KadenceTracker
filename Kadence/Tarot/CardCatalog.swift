@@ -101,6 +101,94 @@ struct TarotCard: Identifiable, Hashable {
         guard let rank, let suit else { return displayName }
         return "\(rank.displayName(for: tradition)) of \(suit.rawValue.capitalized)"
     }
+
+    /// Which grouped section this card belongs to in the picker.
+    var section: CardSection {
+        guard let suit else { return .major }
+        switch suit {
+        case .wands: return .wands
+        case .cups: return .cups
+        case .swords: return .swords
+        case .pentacles: return .pentacles
+        }
+    }
+
+    /// The pip number for Aces/2–10, the arcana number for a Major, nil for
+    /// courts. Parsed from the id, which already encodes it.
+    var number: Int? {
+        let parts = id.split(separator: "-")
+        guard parts.count == 2, let value = Int(parts[1]) else { return nil }
+        return value
+    }
+
+    /// Everything a query can match against, lowercased. Covers spelled-out
+    /// numbers ("six of cups"), bare numbers (a Major by its arcana number,
+    /// or every pip of that rank), roman numerals as Majors are
+    /// traditionally numbered, plus sign/element/planet so the picker
+    /// doubles as a way to find cards by attribution.
+    func searchTokens(for tradition: Tradition) -> [String] {
+        var tokens = [name(for: tradition).lowercased()]
+
+        // Court ranks differ by tradition; accept any tradition's name so a
+        // search for "king of cups" finds it even in a Thoth deck.
+        if let rank, let suit {
+            for other in Tradition.allCases {
+                tokens.append("\(rank.displayName(for: other)) of \(suit.rawValue)".lowercased())
+            }
+        }
+
+        if let number {
+            if suit == nil {
+                tokens.append(String(number))
+                tokens.append(romanNumeral(number).lowercased())
+                tokens += Self.numberWords[number] ?? []
+            } else if let suit {
+                let suitName = suit.rawValue
+                tokens.append("\(number) of \(suitName)")
+                for word in Self.numberWords[number] ?? [] {
+                    tokens.append("\(word) of \(suitName)")
+                }
+            }
+        }
+
+        tokens += signs.map { $0.rawValue }
+        tokens += planets.map { $0.rawValue }
+        if let element { tokens.append(element.rawValue) }
+        if let suit { tokens.append(suit.rawValue) }
+        return tokens
+    }
+
+    private static let numberWords: [Int: [String]] = [
+        0: ["zero"], 1: ["ace", "one"], 2: ["two"], 3: ["three"], 4: ["four"],
+        5: ["five"], 6: ["six"], 7: ["seven"], 8: ["eight"], 9: ["nine"],
+        10: ["ten"], 11: ["eleven"], 12: ["twelve"], 13: ["thirteen"],
+        14: ["fourteen"], 15: ["fifteen"], 16: ["sixteen"], 17: ["seventeen"],
+        18: ["eighteen"], 19: ["nineteen"], 20: ["twenty"], 21: ["twenty one"],
+    ]
+
+    private func romanNumeral(_ value: Int) -> String {
+        guard value > 0 else { return "0" }
+        let table: [(Int, String)] = [(10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")]
+        var remaining = value
+        var result = ""
+        for (amount, numeral) in table {
+            while remaining >= amount {
+                result += numeral
+                remaining -= amount
+            }
+        }
+        return result
+    }
+}
+
+enum CardSection: String, CaseIterable, Identifiable {
+    case major = "Major Arcana"
+    case wands = "Wands \u{00B7} Fire"
+    case cups = "Cups \u{00B7} Water"
+    case swords = "Swords \u{00B7} Air"
+    case pentacles = "Pentacles \u{00B7} Earth"
+
+    var id: String { rawValue }
 }
 
 enum CardCatalog {
@@ -177,5 +265,37 @@ enum CardCatalog {
 
     static func card(id: String) -> TarotCard? {
         all.first { $0.id == id }
+    }
+
+    /// Word-prefix matching on every query word, rather than a substring
+    /// test on the whole query. Substring matching would make "6" match The
+    /// Tower (16) and every other card whose number merely contains a 6;
+    /// requiring each query word to start some card word keeps "6" meaning
+    /// the sixth thing. All words must match, so "six cups" narrows rather
+    /// than widening.
+    static func search(_ query: String, tradition: Tradition) -> [TarotCard] {
+        let queryWords = words(in: query)
+        guard !queryWords.isEmpty else { return all }
+        return all.filter { card in
+            let cardWords = Set(card.searchTokens(for: tradition).flatMap { words(in: $0) })
+            return queryWords.allSatisfy { queryWord in
+                cardWords.contains { $0.hasPrefix(queryWord) }
+            }
+        }
+    }
+
+    /// Grouped for display, preserving catalog order within each section and
+    /// dropping sections with no matches.
+    static func grouped(_ cards: [TarotCard]) -> [(section: CardSection, cards: [TarotCard])] {
+        CardSection.allCases.compactMap { section in
+            let matches = cards.filter { $0.section == section }
+            return matches.isEmpty ? nil : (section, matches)
+        }
+    }
+
+    private static func words(in text: String) -> [String] {
+        text.lowercased()
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .map(String.init)
     }
 }

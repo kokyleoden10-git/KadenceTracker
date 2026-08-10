@@ -80,14 +80,16 @@ enum ResonanceEngine {
     private static let angularHouses = [1, 4, 7, 10]
 
     static func resonance(for card: TarotCard, deckTradition: Tradition, chart: NatalChart) -> ResonanceResult {
-        let name = card.name(for: deckTradition)
         var score = 0
         var pointsInSign: [String] = []
+        var matchedSign: ZodiacSign?
 
         for point in NatalPoint.allCases {
-            if card.signs.contains(point.sign(in: chart)) {
+            let sign = point.sign(in: chart)
+            if card.signs.contains(sign) {
                 score += point.weight
                 pointsInSign.append(point.displayName)
+                if matchedSign == nil { matchedSign = sign }
             }
         }
 
@@ -104,11 +106,9 @@ enum ResonanceEngine {
             }
         }
 
-        var emptyAngularHouse: Int?
-        for sign in card.signs {
+        for sign in card.signs where !pointsInSign.isEmpty {
             if let house = chart.house(of: sign), angularHouses.contains(house) {
                 score += 1
-                if pointsInSign.isEmpty { emptyAngularHouse = house }
             }
         }
 
@@ -125,32 +125,33 @@ enum ResonanceEngine {
         }
 
         let note = noteText(
-            cardName: name, signName: card.signs.first?.displayName,
-            pointsInSign: pointsInSign, rulerMatch: rulerMatch,
-            ascendantSign: chart.ascendant.displayName, emptyAngularHouse: emptyAngularHouse,
-            elementStanding: elementStanding, modalityStanding: modalityStanding
+            matchedSign: matchedSign?.displayName,
+            pointsInSign: pointsInSign,
+            rulerMatch: rulerMatch,
+            ascendantSign: chart.ascendant.displayName,
+            elementStanding: elementStanding,
+            modalityStanding: modalityStanding
         )
         return ResonanceResult(tier: tier, note: note)
     }
 
-    /// Where a card's quality sits in the chart's distribution. Only
-    /// "densest", "rarest", and "absent" count as notable — a merely
-    /// average share says nothing worth printing.
+    /// Where a card's quality sits in the chart's distribution. Affirming
+    /// only — a quality the chart doesn't have at all produces nothing,
+    /// deliberately. (Spec's "conspicuously empty" case is dropped: read
+    /// back on a real draw, telling someone what they lack is the opposite
+    /// of the instrument being useful.)
     private enum Standing {
         case densest(String, Int)
         case rarest(String, Int)
-        case absent(String)
     }
 
     /// Majors carry no explicit element/modality in the catalog, so derive
     /// both from the card's sign when present. Aces have an element but no
-    /// sign (spec: flag them when the chart is notably strong or empty in
-    /// that element — which is exactly this path).
+    /// sign, which is the case spec singles out for element treatment.
     private static func standing<Q: Hashable>(
         of quality: Q?, tally: [Q: Int], name: (Q) -> String
     ) -> Standing? {
-        guard let quality, let count = tally[quality] else { return nil }
-        if count == 0 { return .absent(name(quality)) }
+        guard let quality, let count = tally[quality], count > 0 else { return nil }
         let counts = tally.values.sorted()
         guard let lowest = counts.first, let highest = counts.last, highest != lowest else { return nil }
         // Ties don't qualify — "densest" should mean singular, or it's just
@@ -178,55 +179,42 @@ enum ResonanceEngine {
         let total = NatalChart.talliedPointCount
         switch standing {
         case .densest(let name, let count):
-            return "\(name) is your densest \(kind) (\(count) of \(total))."
+            return "\(name) is your densest \(kind) \u{2014} \(count) of \(total)."
         case .rarest(let name, let count):
-            return "\(name) is your rarest \(kind) (\(count) of \(total))."
-        case .absent(let name):
-            return "No \(name) anywhere in your chart."
+            return "\(name) is your rarest \(kind) \u{2014} \(count) of \(total)."
         }
     }
 
-    /// "Silence is a feature" — only three of the spec's four cases can
-    /// fire without transit data, and even those don't fire on every draw
-    /// (e.g. the empty-sign case only speaks up when that sign sits in an
-    /// angular house, same as the spec's own worked example).
+    /// Affirming only, and never repeats the card's name — the card title
+    /// is already the heading directly above this note in the UI.
     ///
-    /// Element and modality are checked last, and only when they're the
-    /// single densest/rarest/absent quality in the chart. Firing on any
-    /// mere match would light up nearly every card — Water alone covers a
-    /// quarter of the deck — which is the failure mode the spec's silence
-    /// rule exists to prevent.
+    /// Every case here states something the chart actually *has*, and how
+    /// much of it. Nothing fires for a quality the chart lacks, so silence
+    /// carries the "no connection today" meaning by itself, which also
+    /// keeps spec's "silence is a feature" rule intact: element/modality
+    /// only speak when singularly densest or rarest, never on a mere match.
     private static func noteText(
-        cardName: String, signName: String?, pointsInSign: [String],
-        rulerMatch: Planet?, ascendantSign: String, emptyAngularHouse: Int?,
+        matchedSign: String?, pointsInSign: [String],
+        rulerMatch: Planet?, ascendantSign: String,
         elementStanding: Standing?, modalityStanding: Standing?
     ) -> String? {
-        if !pointsInSign.isEmpty, let signName {
-            return "\(cardName) \u{2014} \(signName). Your \(pointsInSign.joined(separator: ", "))."
+        if !pointsInSign.isEmpty, let matchedSign {
+            return "Your \(list(pointsInSign)) in \(matchedSign)."
         }
         if let rulerMatch {
-            return "\(cardName) is \(rulerMatch.displayName), and \(rulerMatch.displayName) rules your \(ascendantSign) Ascendant."
+            return "\(rulerMatch.displayName) rules your \(ascendantSign) Ascendant."
         }
-        if let signName, let house = emptyAngularHouse {
-            return "\(cardName) \u{2014} \(signName). Nothing natal here; your \(ordinal(house)) house."
-        }
-        let prefix = signName.map { "\(cardName) \u{2014} \($0). " } ?? "\(cardName). "
         if let elementStanding {
-            return prefix + phrase(elementStanding, kind: "element")
+            return phrase(elementStanding, kind: "element")
         }
         if let modalityStanding {
-            return prefix + phrase(modalityStanding, kind: "modality")
+            return phrase(modalityStanding, kind: "modality")
         }
         return nil
     }
 
-    private static func ordinal(_ n: Int) -> String {
-        switch n {
-        case 1: return "1st"
-        case 4: return "4th"
-        case 7: return "7th"
-        case 10: return "10th"
-        default: return "\(n)th"
-        }
+    private static func list(_ items: [String]) -> String {
+        guard items.count > 1 else { return items.first ?? "" }
+        return items.dropLast().joined(separator: ", ") + " and " + items[items.count - 1]
     }
 }
