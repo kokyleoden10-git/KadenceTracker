@@ -19,6 +19,8 @@ struct NatalChartFormView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
+    @Query(sort: \NatalChart.createdAt) private var allCharts: [NatalChart]
+
     @State private var sun: ZodiacSign = .aries
     @State private var moon: ZodiacSign = .aries
     @State private var mercury: ZodiacSign = .aries
@@ -160,6 +162,15 @@ struct NatalChartFormView: View {
         if existingChart == nil {
             modelContext.insert(chart)
         }
+
+        // There should only ever be one chart. Earlier builds could create
+        // duplicates (the reopen-resets-to-Aries bug), so clean up any
+        // strays here rather than leaving it ambiguous which one resonance
+        // reads from.
+        for stray in allCharts where stray !== chart {
+            modelContext.delete(stray)
+        }
+
         onSaved()
         dismiss()
     }

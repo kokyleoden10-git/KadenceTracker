@@ -9,7 +9,9 @@ struct DrawView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Deck.createdAt, order: .reverse) private var decks: [Deck]
     @Query(sort: \Entry.occurredAt, order: .reverse) private var entries: [Entry]
-    @Query private var charts: [NatalChart]
+    // Explicit sort so "which chart is the chart" is deterministic — an
+    // unsorted @Query was part of the duplicate-chart bug.
+    @Query(sort: \NatalChart.createdAt) private var charts: [NatalChart]
 
     @State private var isCreatingDeck = false
     @State private var isSettingUpChart = false
@@ -23,6 +25,7 @@ struct DrawView: View {
     @State private var morningLine = ""
 
     @State private var eveningReflection = ""
+    @State private var isConfirmingClear = false
 
     private var chart: NatalChart? { charts.first }
 
@@ -270,6 +273,24 @@ struct DrawView: View {
                 .background(KadenceTheme.piscesTeal)
                 .foregroundStyle(KadenceTheme.bg)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            // Escape hatch for logging out of order (e.g. drawing before
+            // the chart was set, which freezes a resonance note of nil).
+            // Deliberately understated — this isn't part of the daily
+            // ritual, and "start over" shouldn't read as a judgment.
+            Button("Clear today and start over") { isConfirmingClear = true }
+                .font(KadenceTheme.bodyFont(13))
+                .foregroundStyle(KadenceTheme.textMuted)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 4)
+                .confirmationDialog(
+                    "This deletes today's card, your morning line, and any reflection, so you can log the day again. Past days aren't affected.",
+                    isPresented: $isConfirmingClear,
+                    titleVisibility: .visible
+                ) {
+                    Button("Clear Today", role: .destructive) { clearToday(entry) }
+                    Button("Cancel", role: .cancel) {}
+                }
         }
         .onAppear { eveningReflection = entry.eveningReflection ?? "" }
     }
@@ -336,6 +357,20 @@ struct DrawView: View {
     private func saveEvening(_ entry: Entry) {
         entry.eveningReflection = eveningReflection.isEmpty ? nil : eveningReflection
         entry.updatedAt = Date()
+    }
+
+    /// Deletes the whole Entry rather than just its draws — Entry's `draws`
+    /// relationship is .cascade, so this cleans up the Draw records too,
+    /// and dropping the row entirely puts the day back in the same state as
+    /// never having been logged (morningPhase), which is what "start over"
+    /// should mean.
+    private func clearToday(_ entry: Entry) {
+        modelContext.delete(entry)
+        selectedCard = nil
+        isReversed = false
+        jumperNames = []
+        morningLine = ""
+        eveningReflection = ""
     }
 
     private func skipToday() {
