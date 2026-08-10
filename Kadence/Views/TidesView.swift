@@ -1,16 +1,19 @@
 import SwiftUI
 
 /// Replaces streaks (Cosmic Container spec §2). A missed day is a low
-/// tide — present in the shape, never marked as a failure. There is
-/// deliberately no "best run", no chain, and no red anywhere in here.
+/// tide — present in the shape, never marked as a failure. No chain, no
+/// best-run, no red.
 ///
-/// Ships with both treatments behind a toggle so they can be compared on
-/// a real device with real data before one is committed to:
+/// The X axis is the lunar cycle rather than "day 1 to 30" (Analytics spec
+/// §2), so the shape reads against the moon instead of against an
+/// arbitrary window start. Background blocks tint by the element of the
+/// moon's sign, giving the "blue behind water-sign days" context.
 ///
-/// - **Table** honours the v3 banned list — no gradients, no glow, no
-///   illustration. Reads like a tide table.
-/// - **Water** follows the Cosmic Container spec — a filled wave and a
-///   rising level, i.e. "a gathering of water".
+/// On the axis wrap: 30 calendar days is almost exactly one synodic month
+/// (29.53), so the window tiles the axis roughly once. Where two calendar
+/// days land on the same lunar day, their volumes are averaged — which is
+/// also precisely the behaviour wanted later, when several cycles of
+/// history fold onto this same axis to expose a real lunar pattern.
 struct TidesView: View {
     enum Treatment: String, CaseIterable {
         case table = "Table"
@@ -18,31 +21,38 @@ struct TidesView: View {
     }
 
     private static let windowLength = 30
+    private static let lunarBins = 30
+
+    /// Cycles of history before a lunar correlation could mean anything.
+    /// Lunar rhythm has to be separated from the weekly rhythm habits
+    /// already have, and that takes several full cycles — six is the floor,
+    /// and v3's spec says a year for anything involving tarot suits.
+    private static let cyclesNeededForCorrelation = 6
 
     @AppStorage("tidesTreatment") private var treatmentRaw = Treatment.table.rawValue
     private var treatment: Treatment { Treatment(rawValue: treatmentRaw) ?? .table }
 
-    @State private var days: [DayVolume] = []
+    @State private var bins: [LunarBin] = []
+    @State private var observedDays = 0
     @State private var status = "Loading\u{2026}"
 
-    /// TEMPORARY scaffolding for choosing between the two treatments. With
-    /// only a day or two of real entries both shapes render as a single
-    /// blip, which says nothing about the design. Purely in-memory —
-    /// nothing is written to Supabase — and this whole toggle should be
-    /// deleted once a treatment is picked.
+    /// TEMPORARY scaffolding for choosing a treatment — in-memory only,
+    /// never written. Delete once a treatment is picked.
     @State private var showSample = false
 
-    struct DayVolume: Identifiable {
-        let date: Date
-        let completed: Int
-        var id: Date { date }
+    struct LunarBin: Identifiable {
+        let lunarDay: Int
+        let volume: Double
+        let observations: Int
+        let moonSign: ZodiacSign
+        var id: Int { lunarDay }
+        var hasData: Bool { observations > 0 }
     }
 
-    private var peak: Int { max(days.map(\.completed).max() ?? 0, 1) }
-    private var total: Int { days.reduce(0) { $0 + $1.completed } }
-    private var mean: Double {
-        days.isEmpty ? 0 : Double(total) / Double(days.count)
-    }
+    private var peak: Double { max(bins.map(\.volume).max() ?? 0, 1) }
+    private var total: Double { bins.reduce(0) { $0 + $1.volume } }
+    private var restedDays: Int { bins.filter { $0.hasData && $0.volume == 0 }.count }
+    private var cyclesObserved: Double { Double(observedDays) / MoonService.synodicMonth }
 
     var body: some View {
         NavigationStack {
@@ -76,11 +86,9 @@ struct TidesView: View {
                                 .tracking(1.2)
                                 .foregroundStyle(KadenceTheme.ariesEmber)
                         }
-                        switch treatment {
-                        case .table: tableTreatment
-                        case .water: waterTreatment
-                        }
-                        readout
+                        chart
+                        phaseAxis
+                        insights
                     }
                 }
                 .padding()
@@ -99,109 +107,111 @@ struct TidesView: View {
                 .font(KadenceTheme.bodyFontSemibold(12))
                 .tracking(1.4)
                 .foregroundStyle(KadenceTheme.textMuted)
-            Text("Last 30 days")
+            Text("Across the lunar cycle")
                 .font(KadenceTheme.displayFont(28))
                 .foregroundStyle(KadenceTheme.textPrimary)
+            Text("Today \u{00B7} lunar day \(Int(MoonService.lunarAge(Date())) + 1) \u{00B7} \(MoonService.phase(Date()).rawValue) \u{00B7} moon in \(MoonService.sign(Date()).displayName)")
+                .font(KadenceTheme.bodyFont(12))
+                .foregroundStyle(KadenceTheme.textMuted)
         }
     }
 
-    // MARK: - Table treatment
+    // MARK: - Chart
 
-    private var tableTreatment: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            GeometryReader { proxy in
-                let columnWidth = proxy.size.width / CGFloat(Self.windowLength)
-                ZStack(alignment: .bottomLeading) {
-                    // Mean line, so a day reads against your own baseline
-                    // rather than against a target.
-                    let meanHeight = proxy.size.height * (mean / Double(peak))
-                    Rectangle()
-                        .fill(KadenceTheme.textMuted.opacity(0.25))
-                        .frame(height: 1)
-                        .offset(y: -meanHeight)
+    private var chart: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .bottomLeading) {
+                moonSignBlocks(in: proxy.size)
+                quarterMarkers(in: proxy.size)
 
-                    HStack(alignment: .bottom, spacing: 1) {
-                        ForEach(days) { day in
-                            Rectangle()
-                                .fill(barColor(for: day))
-                                .frame(
-                                    width: max(columnWidth - 1, 1),
-                                    height: max(proxy.size.height * (Double(day.completed) / Double(peak)), 1)
-                                )
-                        }
-                    }
+                switch treatment {
+                case .table: tableMarks(in: proxy.size)
+                case .water: waterMarks(in: proxy.size)
                 }
             }
-            .frame(height: 140)
+        }
+        .frame(height: 170)
+    }
 
-            axisLabels
+    /// Element of the moon's sign, tinted behind the chart — water reads
+    /// blue-green, fire warm, and so on (Analytics spec §2).
+    private func moonSignBlocks(in size: CGSize) -> some View {
+        let binWidth = size.width / CGFloat(Self.lunarBins)
+        return ForEach(bins) { bin in
+            Rectangle()
+                .fill(tint(for: bin.moonSign))
+                .frame(width: binWidth, height: size.height)
+                .offset(x: CGFloat(bin.lunarDay) * binWidth)
         }
     }
 
-    /// Empty days still draw a hairline so the rhythm stays legible —
-    /// a gap you can see, not a gap that indicts you.
-    private func barColor(for day: DayVolume) -> Color {
-        day.completed == 0
-            ? KadenceTheme.textMuted.opacity(0.22)
-            : KadenceTheme.piscesTeal
-    }
-
-    // MARK: - Water treatment
-
-    private var waterTreatment: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            GeometryReader { proxy in
-                let points = wavePoints(in: proxy.size)
-                ZStack {
-                    // Filled body of water under the curve.
-                    smoothPath(through: points, closingIn: proxy.size)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    KadenceTheme.piscesSeafoam.opacity(0.45),
-                                    KadenceTheme.piscesTeal.opacity(0.05),
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-
-                    // Surface line.
-                    smoothPath(through: points, closingIn: nil)
-                        .stroke(KadenceTheme.piscesSeafoam, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-
-                    // Today, marked without a number attached to it.
-                    if let last = points.last {
-                        Circle()
-                            .fill(KadenceTheme.piscesSeafoam)
-                            .frame(width: 7, height: 7)
-                            .position(last)
-                    }
-                }
-            }
-            .frame(height: 160)
-
-            axisLabels
+    private func tint(for sign: ZodiacSign) -> Color {
+        switch element(of: sign) {
+        case .water: return KadenceTheme.aquariusIce.opacity(0.10)
+        case .fire: return KadenceTheme.ariesEmber.opacity(0.08)
+        case .air: return KadenceTheme.sagittariusIndigo.opacity(0.09)
+        case .earth: return KadenceTheme.capricornBronze.opacity(0.08)
         }
     }
 
+    private func quarterMarkers(in size: CGSize) -> some View {
+        // New / First Quarter / Full / Last Quarter, at cycle fractions.
+        let fractions: [Double] = [0, 0.25, 0.5, 0.75]
+        return ForEach(fractions, id: \.self) { fraction in
+            Rectangle()
+                .fill(KadenceTheme.textMuted.opacity(0.18))
+                .frame(width: 1, height: size.height)
+                .offset(x: size.width * fraction)
+        }
+    }
+
+    private func tableMarks(in size: CGSize) -> some View {
+        let binWidth = size.width / CGFloat(Self.lunarBins)
+        return ForEach(bins) { bin in
+            Rectangle()
+                .fill(bin.volume > 0 ? KadenceTheme.piscesTeal : KadenceTheme.textMuted.opacity(0.22))
+                .frame(
+                    width: max(binWidth - 1.5, 1),
+                    height: max(size.height * (bin.volume / peak), bin.hasData ? 1 : 0)
+                )
+                .offset(x: CGFloat(bin.lunarDay) * binWidth)
+        }
+    }
+
+    private func waterMarks(in size: CGSize) -> some View {
+        let points = wavePoints(in: size)
+        return ZStack {
+            smoothPath(through: points, closingIn: size)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            KadenceTheme.piscesSeafoam.opacity(0.45),
+                            KadenceTheme.piscesTeal.opacity(0.05),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+            smoothPath(through: points, closingIn: nil)
+                .stroke(KadenceTheme.piscesSeafoam, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+        }
+    }
+
+    /// Only bins with observations become vertices — an unobserved lunar
+    /// day shouldn't be drawn as a zero, which would fabricate a trough.
     private func wavePoints(in size: CGSize) -> [CGPoint] {
-        guard days.count > 1 else { return [] }
-        let stepX = size.width / CGFloat(days.count - 1)
-        return days.enumerated().map { index, day in
-            let ratio = Double(day.completed) / Double(peak)
-            // Inset from the very top/bottom so the curve reads as a water
-            // surface with depth rather than a chart clipping its bounds.
-            let y = size.height - (size.height * 0.85 * ratio) - size.height * 0.05
-            return CGPoint(x: CGFloat(index) * stepX, y: y)
+        let binWidth = size.width / CGFloat(Self.lunarBins)
+        return bins.filter(\.hasData).map { bin in
+            CGPoint(
+                x: CGFloat(bin.lunarDay) * binWidth + binWidth / 2,
+                y: size.height - (size.height * 0.85 * (bin.volume / peak)) - size.height * 0.05
+            )
         }
     }
 
-    /// Quadratic smoothing through midpoints — enough to feel fluid, and
-    /// it can't overshoot into false peaks the way a cubic spline can.
     private func smoothPath(through points: [CGPoint], closingIn size: CGSize?) -> Path {
         var path = Path()
-        guard let first = points.first else { return path }
+        guard let first = points.first, points.count > 1 else { return path }
         path.move(to: first)
         for index in 1..<points.count {
             let previous = points[index - 1]
@@ -220,78 +230,186 @@ struct TidesView: View {
         return path
     }
 
-    // MARK: - Shared
-
-    private var axisLabels: some View {
-        HStack {
-            Text(days.first.map(shortDate) ?? "")
+    private var phaseAxis: some View {
+        HStack(spacing: 0) {
+            Text("New")
             Spacer()
-            Text("Today")
+            Text("First Qtr")
+            Spacer()
+            Text("Full")
+            Spacer()
+            Text("Last Qtr")
+            Spacer()
+            Text("New")
         }
-        .font(KadenceTheme.bodyFont(11))
+        .font(KadenceTheme.bodyFont(10))
         .foregroundStyle(KadenceTheme.textMuted)
     }
 
-    /// Cumulative volume rather than consecutive days — the whole point of
-    /// the replacement. "Rested" is the neutral word for a zero day.
-    private var readout: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("\(total) logged across 30 days")
+    // MARK: - Insights
+
+    /// Descriptive only, and every line carries its sample size. Nothing
+    /// here asserts a correlation, because at this volume none would be
+    /// trustworthy — see `correlationGate`.
+    private var insights: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("\(Int(total.rounded())) logged \u{00B7} \(observedDays) days observed \u{00B7} \(restedDays) rested")
                 .font(KadenceTheme.bodyFont(15))
                 .foregroundStyle(KadenceTheme.textPrimary)
-            Text("Fullest day \(peak) \u{00B7} typical day \(String(format: "%.1f", mean)) \u{00B7} \(days.filter { $0.completed == 0 }.count) rested")
-                .font(KadenceTheme.bodyFont(12))
-                .foregroundStyle(KadenceTheme.textMuted)
+
+            ForEach(observations, id: \.self) { line in
+                Text(line)
+                    .font(KadenceTheme.bodyFont(12))
+                    .foregroundStyle(KadenceTheme.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            correlationGate
         }
     }
 
-    private func shortDate(_ day: DayVolume) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d"
-        return formatter.string(from: day.date)
+    private var observations: [String] {
+        guard let fullest = bins.filter(\.hasData).max(by: { $0.volume < $1.volume }), fullest.volume > 0 else {
+            return ["Nothing logged in this window yet."]
+        }
+
+        var lines: [String] = []
+        let phaseName = MoonService.phase(dateForLunarDay(fullest.lunarDay)).rawValue
+        lines.append("Fullest so far: lunar day \(fullest.lunarDay + 1) (\(phaseName.lowercased())).")
+
+        // Waxing vs waning halves, with counts attached so the reader can
+        // see how thin the evidence is.
+        let waxing = bins.filter { $0.hasData && $0.lunarDay < Self.lunarBins / 2 }
+        let waning = bins.filter { $0.hasData && $0.lunarDay >= Self.lunarBins / 2 }
+        if !waxing.isEmpty, !waning.isEmpty {
+            let waxingMean = waxing.reduce(0) { $0 + $1.volume } / Double(waxing.count)
+            let waningMean = waning.reduce(0) { $0 + $1.volume } / Double(waning.count)
+            lines.append(String(
+                format: "Waxing days averaged %.1f across %d days; waning %.1f across %d.",
+                waxingMean, waxing.count, waningMean, waning.count
+            ))
+        }
+
+        let waterDays = bins.filter { $0.hasData && element(of: $0.moonSign) == .water }
+        if !waterDays.isEmpty {
+            let mean = waterDays.reduce(0) { $0 + $1.volume } / Double(waterDays.count)
+            lines.append(String(
+                format: "Water-sign moon days averaged %.1f across %d days.",
+                mean, waterDays.count
+            ))
+        }
+        return lines
     }
+
+    /// The honest version of the Analytics spec's §3 engine: rather than
+    /// print a correlation coefficient computed from too little data, show
+    /// how far off having one actually is. This is the same posture as the
+    /// rest of the app — report, don't claim.
+    private var correlationGate: some View {
+        let needed = Double(Self.cyclesNeededForCorrelation)
+        let progress = min(cyclesObserved / needed, 1)
+        return VStack(alignment: .leading, spacing: 6) {
+            Divider().overlay(KadenceTheme.textMuted.opacity(0.2))
+            Text("PATTERNS")
+                .font(KadenceTheme.bodyFontSemibold(10))
+                .tracking(1.2)
+                .foregroundStyle(KadenceTheme.textMuted)
+            if cyclesObserved >= needed {
+                Text("Enough history to start testing whether these differences are real rather than noise.")
+                    .font(KadenceTheme.bodyFont(12))
+                    .foregroundStyle(KadenceTheme.piscesSeafoam)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ProgressView(value: progress)
+                    .tint(KadenceTheme.piscesTeal)
+                Text(String(
+                    format: "%.1f of %d lunar cycles logged. Below that, a moon-vs-habit correlation can't be told apart from your weekly rhythm, so none is shown.",
+                    cyclesObserved, Self.cyclesNeededForCorrelation
+                ))
+                .font(KadenceTheme.bodyFont(12))
+                .foregroundStyle(KadenceTheme.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func dateForLunarDay(_ lunarDay: Int) -> Date {
+        let today = Calendar.current.startOfDay(for: Date())
+        let todayLunarDay = Int(MoonService.lunarAge(today))
+        let delta = lunarDay - todayLunarDay
+        return Calendar.current.date(byAdding: .day, value: delta, to: today) ?? today
+    }
+
+    // MARK: - Load
 
     private func load() async {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
         guard let start = calendar.date(byAdding: .day, value: -(Self.windowLength - 1), to: today) else { return }
 
-        if showSample {
-            // Deterministic, with genuine rest days and an uneven rhythm —
-            // a flattering smooth curve would misrepresent both designs.
-            let pattern = [3, 4, 2, 0, 1, 3, 5, 4, 0, 0, 2, 3, 4, 6, 5, 3,
-                           1, 0, 2, 4, 5, 5, 3, 0, 1, 2, 4, 3, 5, 4]
-            days = (0..<Self.windowLength).compactMap { offset in
-                guard let date = calendar.date(byAdding: .day, value: offset, to: start) else { return nil }
-                return DayVolume(date: date, completed: pattern[offset % pattern.count])
-            }
-            status = ""
-            return
-        }
-
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
 
-        do {
-            let entries = try await LogEntryService.fetchRange(from: start, to: today)
-            // Keyed on the raw "yyyy-MM-dd" string rather than a parsed
-            // Date — log_entry.date is a bare Postgres date, so comparing
-            // strings sidesteps any timezone shifting a round-trip through
-            // Date could introduce.
-            var counts: [String: Int] = [:]
-            for entry in entries where entry.doneValue > 0 {
-                counts[entry.date, default: 0] += 1
+        // Completions drive the volume, but *any* row makes a day observed —
+        // a day where everything was marked not-done is a real, deliberate
+        // low tide, and must not vanish from the denominator. Without that
+        // distinction "rested" would always read 0.
+        var completions: [String: Int] = [:]
+        var observedDates: Set<String> = []
+
+        if showSample {
+            let pattern = [3, 4, 2, 0, 1, 3, 5, 4, 0, 0, 2, 3, 4, 6, 5, 3,
+                           1, 0, 2, 4, 5, 5, 3, 0, 1, 2, 4, 3, 5, 4]
+            for offset in 0..<Self.windowLength {
+                guard let date = calendar.date(byAdding: .day, value: offset, to: start) else { continue }
+                let key = formatter.string(from: date)
+                completions[key] = pattern[offset % pattern.count]
+                observedDates.insert(key)
             }
-            days = (0..<Self.windowLength).compactMap { offset in
-                guard let date = calendar.date(byAdding: .day, value: offset, to: start) else { return nil }
-                return DayVolume(date: date, completed: counts[formatter.string(from: date)] ?? 0)
+        } else {
+            do {
+                let entries = try await LogEntryService.fetchRange(from: start, to: today)
+                for entry in entries {
+                    observedDates.insert(entry.date)
+                    if entry.doneValue > 0 {
+                        completions[entry.date, default: 0] += 1
+                    }
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                status = "Couldn't load tides: \(error.localizedDescription)"
+                return
             }
-            status = ""
-        } catch is CancellationError {
-            // Superseded reload; a newer one already reflects the data.
-        } catch {
-            status = "Couldn't load tides: \(error.localizedDescription)"
         }
+
+        // Fold calendar days onto lunar days, averaging any collisions.
+        var totals: [Int: (sum: Int, days: Int)] = [:]
+        var observed = 0
+        for offset in 0..<Self.windowLength {
+            guard let date = calendar.date(byAdding: .day, value: offset, to: start) else { continue }
+            let key = formatter.string(from: date)
+            // Days with no rows at all are skipped rather than counted as
+            // rested — we can't tell "chose not to" from "wasn't using the
+            // app yet", and guessing would inflate the rested count.
+            guard observedDates.contains(key) else { continue }
+            let bin = min(Int(MoonService.lunarAge(date)), Self.lunarBins - 1)
+            let existing = totals[bin] ?? (0, 0)
+            totals[bin] = (existing.sum + (completions[key] ?? 0), existing.days + 1)
+            observed += 1
+        }
+
+        observedDays = observed
+        bins = (0..<Self.lunarBins).map { bin in
+            let entry = totals[bin]
+            return LunarBin(
+                lunarDay: bin,
+                volume: entry.map { Double($0.sum) / Double($0.days) } ?? 0,
+                observations: entry?.days ?? 0,
+                moonSign: MoonService.sign(dateForLunarDay(bin))
+            )
+        }
+        status = ""
     }
 }
 
