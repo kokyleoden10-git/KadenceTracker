@@ -151,13 +151,36 @@ final class NatalChart {
         houses.firstIndex(of: sign).map { $0 + 1 }
     }
 
+    /// Tallies include the Ascendant and Midheaven alongside the ten
+    /// planets — 12 points total. The angles are structural enough to count
+    /// in a "what is this chart made of" summary, which is what these are
+    /// for (spec's Chart screen, and the notable-element resonance case).
+    private var talliedSigns: [ZodiacSign] {
+        Array(placements.values) + [ascendant, midheaven]
+    }
+
+    static let talliedPointCount = 12
+
     var elementTally: [Element: Int] {
         var tally: [Element: Int] = [.fire: 0, .water: 0, .air: 0, .earth: 0]
-        for sign in placements.values {
+        for sign in talliedSigns {
             tally[element(of: sign), default: 0] += 1
         }
         return tally
     }
+
+    var modalityTally: [Modality: Int] {
+        var tally: [Modality: Int] = [.cardinal: 0, .fixed: 0, .mutable: 0]
+        for sign in talliedSigns {
+            tally[modality(of: sign), default: 0] += 1
+        }
+        return tally
+    }
+}
+
+enum Modality: String, CaseIterable, Codable {
+    case cardinal, fixed, mutable
+    var displayName: String { rawValue.capitalized }
 }
 
 func element(of sign: ZodiacSign) -> Element {
@@ -166,5 +189,13 @@ func element(of sign: ZodiacSign) -> Element {
     case .taurus, .virgo, .capricorn: return .earth
     case .gemini, .libra, .aquarius: return .air
     case .cancer, .scorpio, .pisces: return .water
+    }
+}
+
+func modality(of sign: ZodiacSign) -> Modality {
+    switch sign {
+    case .aries, .cancer, .libra, .capricorn: return .cardinal
+    case .taurus, .leo, .scorpio, .aquarius: return .fixed
+    case .gemini, .virgo, .sagittarius, .pisces: return .mutable
     }
 }

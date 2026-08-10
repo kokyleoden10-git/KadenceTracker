@@ -112,6 +112,11 @@ enum ResonanceEngine {
             }
         }
 
+        let elementStanding = notableElement(for: card, chart: chart)
+        let modalityStanding = notableModality(for: card, chart: chart)
+        if elementStanding != nil { score += 2 }
+        if modalityStanding != nil { score += 1 }
+
         let tier: ResonanceTier
         switch score {
         case 0...1: tier = .quiet
@@ -122,18 +127,79 @@ enum ResonanceEngine {
         let note = noteText(
             cardName: name, signName: card.signs.first?.displayName,
             pointsInSign: pointsInSign, rulerMatch: rulerMatch,
-            ascendantSign: chart.ascendant.displayName, emptyAngularHouse: emptyAngularHouse
+            ascendantSign: chart.ascendant.displayName, emptyAngularHouse: emptyAngularHouse,
+            elementStanding: elementStanding, modalityStanding: modalityStanding
         )
         return ResonanceResult(tier: tier, note: note)
+    }
+
+    /// Where a card's quality sits in the chart's distribution. Only
+    /// "densest", "rarest", and "absent" count as notable — a merely
+    /// average share says nothing worth printing.
+    private enum Standing {
+        case densest(String, Int)
+        case rarest(String, Int)
+        case absent(String)
+    }
+
+    /// Majors carry no explicit element/modality in the catalog, so derive
+    /// both from the card's sign when present. Aces have an element but no
+    /// sign (spec: flag them when the chart is notably strong or empty in
+    /// that element — which is exactly this path).
+    private static func standing<Q: Hashable>(
+        of quality: Q?, tally: [Q: Int], name: (Q) -> String
+    ) -> Standing? {
+        guard let quality, let count = tally[quality] else { return nil }
+        if count == 0 { return .absent(name(quality)) }
+        let counts = tally.values.sorted()
+        guard let lowest = counts.first, let highest = counts.last, highest != lowest else { return nil }
+        // Ties don't qualify — "densest" should mean singular, or it's just
+        // one of several and not worth calling out.
+        if count == highest, tally.values.filter({ $0 == highest }).count == 1 {
+            return .densest(name(quality), count)
+        }
+        if count == lowest, tally.values.filter({ $0 == lowest }).count == 1 {
+            return .rarest(name(quality), count)
+        }
+        return nil
+    }
+
+    private static func notableElement(for card: TarotCard, chart: NatalChart) -> Standing? {
+        let cardElement = card.element ?? card.signs.first.map(element(of:))
+        return standing(of: cardElement, tally: chart.elementTally) { $0.displayName }
+    }
+
+    private static func notableModality(for card: TarotCard, chart: NatalChart) -> Standing? {
+        let cardModality = card.signs.first.map(modality(of:))
+        return standing(of: cardModality, tally: chart.modalityTally) { $0.displayName }
+    }
+
+    private static func phrase(_ standing: Standing, kind: String) -> String {
+        let total = NatalChart.talliedPointCount
+        switch standing {
+        case .densest(let name, let count):
+            return "\(name) is your densest \(kind) (\(count) of \(total))."
+        case .rarest(let name, let count):
+            return "\(name) is your rarest \(kind) (\(count) of \(total))."
+        case .absent(let name):
+            return "No \(name) anywhere in your chart."
+        }
     }
 
     /// "Silence is a feature" — only three of the spec's four cases can
     /// fire without transit data, and even those don't fire on every draw
     /// (e.g. the empty-sign case only speaks up when that sign sits in an
     /// angular house, same as the spec's own worked example).
+    ///
+    /// Element and modality are checked last, and only when they're the
+    /// single densest/rarest/absent quality in the chart. Firing on any
+    /// mere match would light up nearly every card — Water alone covers a
+    /// quarter of the deck — which is the failure mode the spec's silence
+    /// rule exists to prevent.
     private static func noteText(
         cardName: String, signName: String?, pointsInSign: [String],
-        rulerMatch: Planet?, ascendantSign: String, emptyAngularHouse: Int?
+        rulerMatch: Planet?, ascendantSign: String, emptyAngularHouse: Int?,
+        elementStanding: Standing?, modalityStanding: Standing?
     ) -> String? {
         if !pointsInSign.isEmpty, let signName {
             return "\(cardName) \u{2014} \(signName). Your \(pointsInSign.joined(separator: ", "))."
@@ -143,6 +209,13 @@ enum ResonanceEngine {
         }
         if let signName, let house = emptyAngularHouse {
             return "\(cardName) \u{2014} \(signName). Nothing natal here; your \(ordinal(house)) house."
+        }
+        let prefix = signName.map { "\(cardName) \u{2014} \($0). " } ?? "\(cardName). "
+        if let elementStanding {
+            return prefix + phrase(elementStanding, kind: "element")
+        }
+        if let modalityStanding {
+            return prefix + phrase(modalityStanding, kind: "modality")
         }
         return nil
     }

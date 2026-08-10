@@ -18,6 +18,7 @@ enum Planet: String, CaseIterable, Codable, Identifiable {
 
 enum Element: String, CaseIterable, Codable {
     case fire, water, air, earth
+    var displayName: String { rawValue.capitalized }
 }
 
 enum Suit: String, CaseIterable, Codable {
