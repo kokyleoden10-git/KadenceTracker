@@ -27,6 +27,19 @@ enum LogEntryService {
             .value
     }
 
+    /// Inclusive of both endpoints. Used by Tides, which reads a rolling
+    /// 30-day window rather than a single day.
+    static func fetchRange(from start: Date, to end: Date) async throws -> [LogEntry] {
+        try await SupabaseService.shared.client
+            .from("log_entry")
+            .select()
+            .gte("date", value: dateFormatter.string(from: start))
+            .lte("date", value: dateFormatter.string(from: end))
+            .order("date")
+            .execute()
+            .value
+    }
+
     struct LogEntryInput: Encodable {
         var habitId: UUID
         var date: String

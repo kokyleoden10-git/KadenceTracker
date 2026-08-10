@@ -18,13 +18,14 @@ struct HabitRow: View {
                             .font(KadenceTheme.bodyFont(15))
                             .foregroundStyle(KadenceTheme.textPrimary)
 
+                        // No streak count by design — replaced by Tides
+                        // (Cosmic Container spec §2). habit.streak_count
+                        // stays in the schema but is deliberately unread,
+                        // so nothing is destroyed if it's ever wanted back.
                         HStack(spacing: 6) {
                             Text(habit.tier == .anchor ? "Anchor" : "Practice")
                             if habit.direction == .reduce {
                                 Text("\u{00B7} Reduce")
-                            }
-                            if habit.streakCount > 0 {
-                                Text("\u{00B7} \(habit.streakCount)\u{1F525}")
                             }
                         }
                         .font(KadenceTheme.bodyFont(11))

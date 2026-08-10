@@ -20,6 +20,9 @@ struct ContentView: View {
                 HabitsGatedView { HomeView() }
                     .tabItem { Label("Today", systemImage: "house.fill") }
 
+                HabitsGatedView { TidesView() }
+                    .tabItem { Label("Tides", systemImage: "water.waves") }
+
                 HabitsGatedView { SettingsView() }
                     .tabItem { Label("Settings", systemImage: "gearshape.fill") }
             }
