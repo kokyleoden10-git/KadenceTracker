@@ -1,4 +1,3 @@
-import SwiftData
 import SwiftUI
 
 /// Replaces streaks (Cosmic Container spec §2). A missed day is a low
@@ -28,14 +27,20 @@ struct TidesView: View {
     /// have, and that takes several full cycles — six is the floor.
     private static let cyclesNeededForCorrelation = 6
 
-    @Query(sort: \NatalChart.createdAt) private var charts: [NatalChart]
-    private var chart: NatalChart? { charts.first }
+    /// Loaded from Supabase like everything else — this used to read a
+    /// SwiftData @Query, which went stale the moment charts moved and made a
+    /// configured chart look unset.
+    @State private var chart: RemoteNatalChart?
 
     @State private var bins: [LunarBin] = []
     @State private var observedDays = 0
     @State private var restedDayCount = 0
     @State private var lifetimeLoggedDays = 0
     @State private var lifetimeSpanDays = 0
+    /// Lunar days that have a card logged. Draws are not habit completions,
+    /// so they never feed the wave's volume — they're marked alongside it.
+    @State private var drawLunarDays: Set<Int> = []
+    @State private var drawDayCount = 0
     @State private var status = "Loading\u{2026}"
 
     /// Still here only because there isn't enough real history to see the
@@ -62,18 +67,7 @@ struct TidesView: View {
     /// Which natal bodies sit in each sign, so a transiting moon can be
     /// reported as crossing something specific.
     private var occupants: [ZodiacSign: [String]] {
-        guard let chart else { return [:] }
-        var map: [ZodiacSign: [String]] = [:]
-        let named: [(String, ZodiacSign)] = [
-            ("Sun", chart.sun), ("Moon", chart.moon), ("Mercury", chart.mercury),
-            ("Venus", chart.venus), ("Mars", chart.mars), ("Jupiter", chart.jupiter),
-            ("Saturn", chart.saturn), ("Uranus", chart.uranus), ("Neptune", chart.neptune),
-            ("Pluto", chart.pluto), ("Ascendant", chart.ascendant), ("Midheaven", chart.midheaven),
-        ]
-        for (name, sign) in named {
-            map[sign, default: []].append(name)
-        }
-        return map
+        chart?.placements.occupants ?? [:]
     }
 
     var body: some View {
@@ -192,7 +186,9 @@ struct TidesView: View {
                 Text("No tide yet.")
                     .font(KadenceTheme.displayFont(20))
                     .foregroundStyle(KadenceTheme.textPrimary)
-                Text("Log a few days and the shape starts to show. Nothing here counts against you.")
+                Text(drawDayCount > 0
+                     ? "The tide is built from habits, not draws — you have \(drawDayCount == 1 ? "1 day" : "\(drawDayCount) days") of cards logged, but no habits yet. Add one on Today and the shape starts to show."
+                     : "Log a few days and the shape starts to show. Nothing here counts against you.")
                     .font(KadenceTheme.bodyFont(13))
                     .foregroundStyle(KadenceTheme.textMuted)
                     .fixedSize(horizontal: false, vertical: true)

@@ -30,12 +30,14 @@ struct SettingsView: View {
     @State private var isResetting = false
 
     @AppStorage("permanentDeletionEnabled") private var permanentDeletionEnabled = false
+    @AppStorage("eveningUnlockHour") private var eveningUnlockHour = 20
     @State private var isConfirmingEnableDelete = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 profileSection
+                ritualSection
                 dataSection
                 dangerZoneSection
             }
@@ -130,6 +132,44 @@ struct SettingsView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
         }
+    }
+
+    /// The card log is a morning half and an evening half. Without a gate
+    /// the reflection field opens seconds after the draw is saved, which
+    /// makes "does it read differently now?" meaningless.
+    private var ritualSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("Ritual")
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 4) {
+                    Text("Reflection opens at")
+                        .font(KadenceTheme.bodyFont(12))
+                        .foregroundStyle(KadenceTheme.textMuted)
+                    InfoButton(text: "Your evening reflection on the day's card stays closed until this hour, so you're reflecting on the day rather than on the draw. You can always open it early.")
+                }
+                Picker("Reflection opens at", selection: $eveningUnlockHour) {
+                    ForEach(Array(12...23), id: \.self) { hour in
+                        Text(hourLabel(hour)).tag(hour)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(KadenceTheme.piscesTeal)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(KadenceTheme.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+        }
+    }
+
+    private func hourLabel(_ hour: Int) -> String {
+        var components = DateComponents()
+        components.hour = hour
+        let date = Calendar.current.date(from: components) ?? Date()
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 
     private var dataSection: some View {

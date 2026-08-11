@@ -19,7 +19,16 @@ struct DrawView: View {
     @State private var chart: RemoteNatalChart?
     @State private var todaysEntry: EntryWithDraws?
     @State private var status = ""
+    /// Kept separate from `status`: a successful migration was rendering in
+    /// the error colour because both shared one variable.
+    @State private var infoMessage: String?
     @State private var isLoading = true
+
+    /// The evening half of the ritual shouldn't open the moment the morning
+    /// half is saved. Settable rather than fixed at 8pm, and with an
+    /// override, so the app nudges the rhythm without refusing.
+    @AppStorage("eveningUnlockHour") private var eveningUnlockHour = 20
+    @State private var hasOverriddenEveningGate = false
 
     @State private var isCreatingDeck = false
     @State private var isSettingUpChart = false
@@ -49,9 +58,19 @@ struct DrawView: View {
                     } else if let entry = todaysEntry, entry.entry.skipped {
                         skippedState(entry)
                     } else if let entry = todaysEntry, entry.dailyDraw != nil {
-                        eveningPhase(entry)
+                        if isEveningUnlocked {
+                            eveningPhase(entry)
+                        } else {
+                            loggedAndWaiting(entry)
+                        }
                     } else {
                         morningPhase
+                    }
+
+                    if let infoMessage {
+                        Text(infoMessage)
+                            .font(KadenceTheme.bodyFont(12))
+                            .foregroundStyle(KadenceTheme.textMuted)
                     }
 
                     if !status.isEmpty {
@@ -246,41 +265,101 @@ struct DrawView: View {
 
     // MARK: - Evening
 
+    private var isEveningUnlocked: Bool {
+        hasOverriddenEveningGate
+            || Calendar.current.component(.hour, from: Date()) >= eveningUnlockHour
+    }
+
+    private func unlockDescription() -> String {
+        var components = DateComponents()
+        components.hour = eveningUnlockHour
+        let date = Calendar.current.date(from: components) ?? Date()
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    /// Today's card is drawn and the line is written, but it's still daytime.
+    /// Reflecting an hour after drawing defeats the point of reflecting, so
+    /// the field stays closed until evening — with a way through for someone
+    /// turning in early.
+    private func loggedAndWaiting(_ entry: EntryWithDraws) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            cardCard(entry)
+
+            Text("Come back after \(unlockDescription()) to reflect on how it read.")
+                .font(KadenceTheme.bodyFont(13))
+                .foregroundStyle(KadenceTheme.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button("Reflect now anyway") { hasOverriddenEveningGate = true }
+                .font(KadenceTheme.bodyFont(13))
+                .foregroundStyle(KadenceTheme.piscesTeal)
+
+            clearTodayButton(entry)
+        }
+    }
+
+    private func cardCard(_ entry: EntryWithDraws) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(entry.dailyDraw?.cardName ?? "")
+                .font(KadenceTheme.displayFont(24))
+                .foregroundStyle(KadenceTheme.textPrimary)
+            if entry.dailyDraw?.reversed == true {
+                Text("Reversed")
+                    .font(KadenceTheme.bodyFont(12))
+                    .foregroundStyle(KadenceTheme.textMuted)
+            }
+            if !entry.jumperDraws.isEmpty {
+                Text("Jumpers: \(entry.jumperDraws.map(\.cardName).joined(separator: ", "))")
+                    .font(KadenceTheme.bodyFont(12))
+                    .foregroundStyle(KadenceTheme.textMuted)
+            }
+            if let line = entry.entry.morningRead, !line.isEmpty {
+                Text("\u{201C}\(line)\u{201D}")
+                    .font(KadenceTheme.bodyFont(14))
+                    .italic()
+                    .foregroundStyle(KadenceTheme.piscesSeafoam.opacity(0.9))
+                    .padding(.top, 4)
+            }
+            // Frozen at draw time, so it still reads as it did on the day
+            // even if the chart is corrected later.
+            if let note = entry.dailyDraw?.resonanceNote {
+                Text(note)
+                    .font(KadenceTheme.bodyFont(13))
+                    .foregroundStyle(KadenceTheme.piscesTeal)
+                    .padding(.top, 6)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(KadenceTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    /// Escape hatch for logging out of order (e.g. drawing before the chart
+    /// was set, which freezes a resonance note of nil). Deliberately
+    /// understated — this isn't part of the daily ritual, and "start over"
+    /// shouldn't read as a judgment.
+    private func clearTodayButton(_ entry: EntryWithDraws) -> some View {
+        Button("Clear today and start over") { isConfirmingClear = true }
+            .font(KadenceTheme.bodyFont(13))
+            .foregroundStyle(KadenceTheme.textMuted)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 4)
+            .confirmationDialog(
+                "This deletes today's card, your morning line, and any reflection, so you can log the day again. Past days aren't affected.",
+                isPresented: $isConfirmingClear,
+                titleVisibility: .visible
+            ) {
+                Button("Clear Today", role: .destructive) { Task { await clearToday(entry) } }
+                Button("Cancel", role: .cancel) {}
+            }
+    }
+
     private func eveningPhase(_ entry: EntryWithDraws) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(entry.dailyDraw?.cardName ?? "")
-                    .font(KadenceTheme.displayFont(24))
-                    .foregroundStyle(KadenceTheme.textPrimary)
-                if entry.dailyDraw?.reversed == true {
-                    Text("Reversed")
-                        .font(KadenceTheme.bodyFont(12))
-                        .foregroundStyle(KadenceTheme.textMuted)
-                }
-                if !entry.jumperDraws.isEmpty {
-                    Text("Jumpers: \(entry.jumperDraws.map(\.cardName).joined(separator: ", "))")
-                        .font(KadenceTheme.bodyFont(12))
-                        .foregroundStyle(KadenceTheme.textMuted)
-                }
-                if let line = entry.entry.morningRead, !line.isEmpty {
-                    Text("\u{201C}\(line)\u{201D}")
-                        .font(KadenceTheme.bodyFont(14))
-                        .italic()
-                        .foregroundStyle(KadenceTheme.piscesSeafoam.opacity(0.9))
-                        .padding(.top, 4)
-                }
-                // Frozen at draw time, so it still reads as it did on the
-                // day even if the chart is corrected later.
-                if let note = entry.dailyDraw?.resonanceNote {
-                    Text(note)
-                        .font(KadenceTheme.bodyFont(13))
-                        .foregroundStyle(KadenceTheme.piscesTeal)
-                        .padding(.top, 6)
-                }
-            }
-            .padding(14)
-            .background(KadenceTheme.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            cardCard(entry)
 
             labeledField("What happened? Does it read differently now?", placeholder: "Reflection", text: $eveningReflection)
 
@@ -297,23 +376,7 @@ struct DrawView: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .disabled(isSaving)
 
-            // Escape hatch for logging out of order (e.g. drawing before
-            // the chart was set, which freezes a resonance note of nil).
-            // Deliberately understated — this isn't part of the daily
-            // ritual, and "start over" shouldn't read as a judgment.
-            Button("Clear today and start over") { isConfirmingClear = true }
-                .font(KadenceTheme.bodyFont(13))
-                .foregroundStyle(KadenceTheme.textMuted)
-                .frame(maxWidth: .infinity)
-                .padding(.top, 4)
-                .confirmationDialog(
-                    "This deletes today's card, your morning line, and any reflection, so you can log the day again. Past days aren't affected.",
-                    isPresented: $isConfirmingClear,
-                    titleVisibility: .visible
-                ) {
-                    Button("Clear Today", role: .destructive) { Task { await clearToday(entry) } }
-                    Button("Cancel", role: .cancel) {}
-                }
+            clearTodayButton(entry)
         }
         .onAppear { eveningReflection = entry.entry.eveningReflection ?? "" }
     }
@@ -355,7 +418,7 @@ struct DrawView: View {
             // success, so a reported failure will retry next launch.
             do {
                 if let moved = try await TarotMigrationService.migrateIfNeeded(context: modelContext), !moved.isEmpty {
-                    status = "Moved \(moved.entries) day(s), \(moved.decks) deck(s) and \(moved.charts) chart from this device."
+                    infoMessage = movedDescription(moved)
                 }
             } catch {
                 status = "Couldn't move this device's saved draws: \(error.localizedDescription). Your local copy is untouched; this will retry."
@@ -379,6 +442,19 @@ struct DrawView: View {
             status = "Couldn't load: \(error.localizedDescription)"
             isLoading = false
         }
+    }
+
+    private func movedDescription(_ moved: TarotMigrationService.Result) -> String {
+        var parts: [String] = []
+        if moved.entries > 0 { parts.append(moved.entries == 1 ? "1 day" : "\(moved.entries) days") }
+        if moved.decks > 0 { parts.append(moved.decks == 1 ? "your deck" : "\(moved.decks) decks") }
+        if moved.charts > 0 { parts.append("your chart") }
+        return "Synced \(list(parts)) from this device to your account."
+    }
+
+    private func list(_ items: [String]) -> String {
+        guard items.count > 1 else { return items.first ?? "" }
+        return items.dropLast().joined(separator: ", ") + " and " + items[items.count - 1]
     }
 
     // MARK: - Actions
