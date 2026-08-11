@@ -29,6 +29,9 @@ struct SettingsView: View {
     @State private var isConfirmingReset = false
     @State private var isResetting = false
 
+    @State private var chart: RemoteNatalChart?
+    @State private var isSettingUpChart = false
+
     @AppStorage("permanentDeletionEnabled") private var permanentDeletionEnabled = false
     @AppStorage("eveningUnlockHour") private var eveningUnlockHour = 20
     @State private var isConfirmingEnableDelete = false
@@ -37,6 +40,7 @@ struct SettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 profileSection
+                chartSection
                 ritualSection
                 dataSection
                 dangerZoneSection
@@ -45,6 +49,60 @@ struct SettingsView: View {
         }
         .background(KadenceTheme.bg.ignoresSafeArea())
         .task { await load() }
+        .sheet(isPresented: $isSettingUpChart, onDismiss: { Task { await load() } }) {
+            NatalChartFormView(existingChart: chart) {
+                Task { await load() }
+            }
+        }
+    }
+
+    /// The chart is app-level configuration, not part of the daily draw, so
+    /// it belongs here rather than tucked into the Draw header where only
+    /// that screen could reach it. Draw and Tides both just read it.
+    private var chartSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("Chart")
+
+            if let placements = chart?.placements {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Sun in \(placements.sun.displayName) \u{00B7} Moon in \(placements.moon.displayName) \u{00B7} \(placements.ascendant.displayName) rising")
+                        .font(KadenceTheme.bodyFont(14))
+                        .foregroundStyle(KadenceTheme.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(elementSummary(placements))
+                        .font(KadenceTheme.bodyFont(12))
+                        .foregroundStyle(KadenceTheme.textMuted)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(KadenceTheme.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                Text("No chart yet. Resonance notes and moon crossings stay quiet until there is one.")
+                    .font(KadenceTheme.bodyFont(13))
+                    .foregroundStyle(KadenceTheme.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button(chart == nil ? "Set Up Chart" : "Edit Chart") {
+                isSettingUpChart = true
+            }
+            .frame(maxWidth: .infinity, minHeight: 40)
+            .background(chart == nil ? KadenceTheme.piscesTeal : KadenceTheme.surface)
+            .foregroundStyle(chart == nil ? KadenceTheme.bg : KadenceTheme.textPrimary)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    /// Element tally only — structural fact, no personality blurb, matching
+    /// the posture the spec asks for on its Chart screen.
+    private func elementSummary(_ placements: ChartPlacements) -> String {
+        let tally = placements.elementTally
+        return Element.allCases
+            .map { ($0, tally[$0] ?? 0) }
+            .sorted { $0.1 > $1.1 }
+            .map { "\($0.0.displayName) \($0.1)" }
+            .joined(separator: " \u{00B7} ")
     }
 
     private var profileSection: some View {
@@ -328,6 +386,7 @@ struct SettingsView: View {
     }
 
     private func load() async {
+        chart = try? await NatalChartService.fetch()
         email = AuthService.shared.session?.user.email ?? ""
         guard let loaded = try? await ProfileService.fetchCurrent() else { return }
         profile = loaded

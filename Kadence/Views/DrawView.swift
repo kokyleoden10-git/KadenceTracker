@@ -31,7 +31,6 @@ struct DrawView: View {
     @State private var hasOverriddenEveningGate = false
 
     @State private var isCreatingDeck = false
-    @State private var isSettingUpChart = false
     @State private var isPickingCard = false
     @State private var selectedDeck: RemoteDeck?
 
@@ -93,11 +92,6 @@ struct DrawView: View {
                 Task { await load() }
             }
         }
-        .sheet(isPresented: $isSettingUpChart) {
-            NatalChartFormView(existingChart: chart) {
-                Task { await load() }
-            }
-        }
         .sheet(isPresented: $isPickingCard) {
             CardPickerView(tradition: selectedDeck?.traditionValue ?? .rws) { card in
                 selectedCard = card
@@ -115,14 +109,6 @@ struct DrawView: View {
                 Text(Date(), style: .date)
                     .font(KadenceTheme.displayFont(28))
                     .foregroundStyle(KadenceTheme.textPrimary)
-            }
-            Spacer()
-            Button {
-                isSettingUpChart = true
-            } label: {
-                Text(chart == nil ? "Set up chart" : "Chart set")
-                    .font(KadenceTheme.bodyFont(12))
-                    .foregroundStyle(chart == nil ? KadenceTheme.piscesTeal : KadenceTheme.textMuted)
             }
         }
     }

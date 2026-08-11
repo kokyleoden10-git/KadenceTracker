@@ -162,7 +162,7 @@ struct TidesView: View {
                     .foregroundStyle(tint(for: sign, opacity: 1))
                     .fixedSize(horizontal: false, vertical: true)
             } else if chart == nil {
-                Text("Set up your chart in Draw to see what the moon is crossing.")
+                Text("Set up your chart in Settings to see what the moon is crossing.")
                     .font(KadenceTheme.bodyFont(12))
                     .foregroundStyle(KadenceTheme.textMuted)
             }
@@ -516,6 +516,18 @@ struct TidesView: View {
                         completions[entry.date, default: 0] += 1
                     }
                 }
+
+                chart = try await NatalChartService.fetch()
+
+                // Card draws, marked but never counted as volume — a draw
+                // isn't a habit completion, and blending them would make the
+                // wave mean two things at once.
+                let entries = try await EntryService.fetchAll()
+                drawDayCount = entries.filter { !$0.draws.isEmpty }.count
+                drawLunarDays = Set(entries.compactMap { row -> Int? in
+                    guard !row.draws.isEmpty, let date = SupabaseDate.date(row.entry.date) else { return nil }
+                    return min(Int(MoonService.lunarAge(date)), Self.lunarBins - 1)
+                })
             } catch is CancellationError {
                 return
             } catch {
