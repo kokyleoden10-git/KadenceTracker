@@ -1,5 +1,15 @@
 -- Kadence v2 schema — auth-backed (updated spec §5, §5a)
 --
+-- ⚠️  DESTRUCTIVE — DO NOT RUN THIS AGAINST THE LIVE DATABASE.
+--
+-- This file drops and recreates every table. It was safe exactly once,
+-- when the project held nothing but smoke-test data. There is real logged
+-- data now, so running it again would delete it.
+--
+-- It is kept only as a record of the original structure, and as the script
+-- you would use to stand up a brand-new, empty Supabase project. Ongoing
+-- changes go in supabase/migrations/ as additive files instead.
+--
 -- This REPLACES the previous open-anon-key schema entirely (drop + recreate,
 -- not an in-place migration). Since the project only ever had smoke-test
 -- data on it, a clean replacement is simpler and safer than migrating old

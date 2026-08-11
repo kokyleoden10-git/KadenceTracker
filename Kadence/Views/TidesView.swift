@@ -153,10 +153,10 @@ struct TidesView: View {
                 MoonPhaseGlyph(illumination: MoonService.illumination(today))
                     .frame(width: 26, height: 26)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(MoonService.phase(today).rawValue) \u{00B7} lunar day \(lunarDay)")
+                    Text("\(MoonService.phase(today).rawValue) \u{00B7} \(Int((MoonService.illumination(today) * 100).rounded()))% lit")
                         .font(KadenceTheme.bodyFontSemibold(14))
                         .foregroundStyle(KadenceTheme.textPrimary)
-                    Text("Moon in \(sign.displayName) \u{00B7} \(signElement.displayName)")
+                    Text("Moon in \(sign.displayName) \u{00B7} \(signElement.displayName) \u{00B7} lunar day \(lunarDay)")
                         .font(KadenceTheme.bodyFont(12))
                         .foregroundStyle(KadenceTheme.textMuted)
                 }
