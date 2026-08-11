@@ -1,4 +1,3 @@
-import SwiftData
 import SwiftUI
 
 /// Minimal by design — v3 spec Step 1 doesn't have a card catalog yet
@@ -7,14 +6,15 @@ import SwiftUI
 /// (Thoth Knight = RWS King) only matters once a catalog exists to
 /// translate against.
 struct DeckFormView: View {
-    var onSaved: (Deck) -> Void
+    var onSaved: (RemoteDeck) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var modelContext
 
     @State private var name = ""
     @State private var tradition: Tradition = .rws
     @State private var usesReversals = true
+    @State private var isSaving = false
+    @State private var status: String?
 
     private var isValid: Bool { !name.trimmingCharacters(in: .whitespaces).isEmpty }
 
@@ -54,16 +54,33 @@ struct DeckFormView: View {
                 Spacer()
 
                 Button("Add Deck") {
-                    let deck = Deck(name: name.trimmingCharacters(in: .whitespaces), tradition: tradition, usesReversals: usesReversals)
-                    modelContext.insert(deck)
-                    onSaved(deck)
-                    dismiss()
+                    Task {
+                        isSaving = true
+                        defer { isSaving = false }
+                        do {
+                            let deck = try await DeckService.create(
+                                name: name.trimmingCharacters(in: .whitespaces),
+                                tradition: tradition,
+                                usesReversals: usesReversals
+                            )
+                            onSaved(deck)
+                            dismiss()
+                        } catch {
+                            status = "Couldn't add deck: \(error.localizedDescription)"
+                        }
+                    }
                 }
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .background(isValid ? KadenceTheme.piscesTeal : KadenceTheme.surface)
                 .foregroundStyle(isValid ? KadenceTheme.bg : KadenceTheme.textMuted)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
-                .disabled(!isValid)
+                .disabled(!isValid || isSaving)
+
+                if let status {
+                    Text(status)
+                        .font(KadenceTheme.bodyFont(12))
+                        .foregroundStyle(KadenceTheme.ariesEmber)
+                }
             }
             .padding()
             .background(KadenceTheme.bg.ignoresSafeArea())

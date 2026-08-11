@@ -41,7 +41,7 @@ private enum NatalPoint: CaseIterable {
         }
     }
 
-    func sign(in chart: NatalChart) -> ZodiacSign {
+    func sign(in chart: ChartPlacements) -> ZodiacSign {
         switch self {
         case .sun: return chart.sun
         case .moon: return chart.moon
@@ -79,7 +79,7 @@ private enum NatalPoint: CaseIterable {
 enum ResonanceEngine {
     private static let angularHouses = [1, 4, 7, 10]
 
-    static func resonance(for card: TarotCard, deckTradition: Tradition, chart: NatalChart) -> ResonanceResult {
+    static func resonance(for card: TarotCard, deckTradition: Tradition, chart: ChartPlacements) -> ResonanceResult {
         var score = 0
         var pointsInSign: [String] = []
         var matchedSign: ZodiacSign?
@@ -165,18 +165,18 @@ enum ResonanceEngine {
         return nil
     }
 
-    private static func notableElement(for card: TarotCard, chart: NatalChart) -> Standing? {
+    private static func notableElement(for card: TarotCard, chart: ChartPlacements) -> Standing? {
         let cardElement = card.element ?? card.signs.first.map(element(of:))
         return standing(of: cardElement, tally: chart.elementTally) { $0.displayName }
     }
 
-    private static func notableModality(for card: TarotCard, chart: NatalChart) -> Standing? {
+    private static func notableModality(for card: TarotCard, chart: ChartPlacements) -> Standing? {
         let cardModality = card.signs.first.map(modality(of:))
         return standing(of: cardModality, tally: chart.modalityTally) { $0.displayName }
     }
 
     private static func phrase(_ standing: Standing, kind: String) -> String {
-        let total = NatalChart.talliedPointCount
+        let total = ChartPlacements.talliedPointCount
         switch standing {
         case .densest(let name, let count):
             return "\(name) is your densest \(kind) \u{2014} \(count) of \(total)."

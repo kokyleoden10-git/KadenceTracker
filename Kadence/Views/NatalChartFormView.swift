@@ -1,4 +1,3 @@
-import SwiftData
 import SwiftUI
 
 /// Entry of a chart the user already has (from a prior reading, astro.com,
@@ -13,13 +12,10 @@ import SwiftUI
 /// and no explicit sort on the `@Query` in DrawView, which one counted as
 /// "the" chart was unpredictable, which is exactly the bug this fixes.
 struct NatalChartFormView: View {
-    var existingChart: NatalChart?
+    var existingChart: RemoteNatalChart?
     var onSaved: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var modelContext
-
-    @Query(sort: \NatalChart.createdAt) private var allCharts: [NatalChart]
 
     @State private var sun: ZodiacSign = .aries
     @State private var moon: ZodiacSign = .aries
@@ -37,6 +33,8 @@ struct NatalChartFormView: View {
     @State private var birthDateDescription = ""
     @State private var birthTimeDescription = ""
     @State private var birthLocationDescription = ""
+    @State private var isSaving = false
+    @State private var status: String?
 
     var body: some View {
         NavigationStack {
@@ -65,11 +63,22 @@ struct NatalChartFormView: View {
                     labeledField("Birth time (reference only)", text: $birthTimeDescription)
                     labeledField("Birth place (reference only)", text: $birthLocationDescription)
 
-                    Button("Save Chart") { save() }
+                    Button { Task { await save() } } label: {
+                        Group {
+                            if isSaving { ProgressView() } else { Text("Save Chart") }
+                        }
                         .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(KadenceTheme.piscesTeal)
-                        .foregroundStyle(KadenceTheme.bg)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .background(KadenceTheme.piscesTeal)
+                    .foregroundStyle(KadenceTheme.bg)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .disabled(isSaving)
+
+                    if let status {
+                        Text(status)
+                            .font(KadenceTheme.bodyFont(12))
+                            .foregroundStyle(KadenceTheme.ariesEmber)
+                    }
                 }
                 .padding()
             }
@@ -137,42 +146,30 @@ struct NatalChartFormView: View {
         birthLocationDescription = chart.birthLocationDescription ?? ""
     }
 
-    private func save() {
-        let chart = existingChart ?? NatalChart(
-            sun: sun, moon: moon, mercury: mercury, venus: venus, mars: mars,
-            jupiter: jupiter, saturn: saturn, uranus: uranus, neptune: neptune,
-            pluto: pluto, ascendant: ascendant, midheaven: midheaven
-        )
-        chart.sun = sun
-        chart.moon = moon
-        chart.mercury = mercury
-        chart.venus = venus
-        chart.mars = mars
-        chart.jupiter = jupiter
-        chart.saturn = saturn
-        chart.uranus = uranus
-        chart.neptune = neptune
-        chart.pluto = pluto
-        chart.ascendant = ascendant
-        chart.midheaven = midheaven
-        chart.birthDateDescription = birthDateDescription.isEmpty ? nil : birthDateDescription
-        chart.birthTimeDescription = birthTimeDescription.isEmpty ? nil : birthTimeDescription
-        chart.birthLocationDescription = birthLocationDescription.isEmpty ? nil : birthLocationDescription
-
-        if existingChart == nil {
-            modelContext.insert(chart)
+    /// Upserts on user_id, which is the table's primary key — editing
+    /// replaces the one chart rather than creating a second, so the
+    /// duplicate-chart cleanup the SwiftData version needed is gone.
+    private func save() async {
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            try await NatalChartService.save(
+                NatalChartService.ChartInput(
+                    userId: try await SupabaseService.shared.requireUserId(),
+                    sun: sun, moon: moon, mercury: mercury, venus: venus, mars: mars,
+                    jupiter: jupiter, saturn: saturn, uranus: uranus, neptune: neptune,
+                    pluto: pluto, ascendant: ascendant, midheaven: midheaven,
+                    birthDateDescription: birthDateDescription.isEmpty ? nil : birthDateDescription,
+                    birthTimeDescription: birthTimeDescription.isEmpty ? nil : birthTimeDescription,
+                    birthLocationDescription: birthLocationDescription.isEmpty ? nil : birthLocationDescription,
+                    userNote: existingChart?.userNote
+                )
+            )
+            onSaved()
+            dismiss()
+        } catch {
+            status = "Couldn't save: \(error.localizedDescription)"
         }
-
-        // There should only ever be one chart. Earlier builds could create
-        // duplicates (the reopen-resets-to-Aries bug), so clean up any
-        // strays here rather than leaving it ambiguous which one resonance
-        // reads from.
-        for stray in allCharts where stray !== chart {
-            modelContext.delete(stray)
-        }
-
-        onSaved()
-        dismiss()
     }
 }
 

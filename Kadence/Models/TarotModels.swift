@@ -134,48 +134,6 @@ final class NatalChart {
         self.createdAt = Date()
     }
 
-    var placements: [Planet: ZodiacSign] {
-        [.sun: sun, .moon: moon, .mercury: mercury, .venus: venus, .mars: mars,
-         .jupiter: jupiter, .saturn: saturn, .uranus: uranus, .neptune: neptune, .pluto: pluto]
-    }
-
-    /// Whole-sign houses: the Ascendant's sign is the 1st house, and the
-    /// rest follow in zodiac order. `houses[0]` is the 1st house.
-    var houses: [ZodiacSign] {
-        let signs = ZodiacSign.allCases
-        guard let startIndex = signs.firstIndex(of: ascendant) else { return signs }
-        return (0..<12).map { signs[(startIndex + $0) % 12] }
-    }
-
-    func house(of sign: ZodiacSign) -> Int? {
-        houses.firstIndex(of: sign).map { $0 + 1 }
-    }
-
-    /// Tallies include the Ascendant and Midheaven alongside the ten
-    /// planets — 12 points total. The angles are structural enough to count
-    /// in a "what is this chart made of" summary, which is what these are
-    /// for (spec's Chart screen, and the notable-element resonance case).
-    private var talliedSigns: [ZodiacSign] {
-        Array(placements.values) + [ascendant, midheaven]
-    }
-
-    static let talliedPointCount = 12
-
-    var elementTally: [Element: Int] {
-        var tally: [Element: Int] = [.fire: 0, .water: 0, .air: 0, .earth: 0]
-        for sign in talliedSigns {
-            tally[element(of: sign), default: 0] += 1
-        }
-        return tally
-    }
-
-    var modalityTally: [Modality: Int] {
-        var tally: [Modality: Int] = [.cardinal: 0, .fixed: 0, .mutable: 0]
-        for sign in talliedSigns {
-            tally[modality(of: sign), default: 0] += 1
-        }
-        return tally
-    }
 }
 
 enum Modality: String, CaseIterable, Codable {

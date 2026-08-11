@@ -2,21 +2,29 @@ import SwiftData
 import SwiftUI
 
 /// v3 spec, Step 1 + resonance (§Resonance) — the daily loop plus card
-/// attribution against a natal chart. Still local-only (SwiftData), no
-/// auth, no ephemeris — the chart is entered once from data the user
-/// already has (see NatalChartFormView), not computed on-device.
+/// attribution against a natal chart.
+///
+/// Now Supabase-backed rather than SwiftData: one store for the whole app,
+/// so a day's card and a day's habits live side by side and can be read
+/// together. The tradeoff, accepted deliberately, is that this screen needs
+/// a signed-in session and a network connection — there is no offline
+/// logging. `TarotMigrationService` moves anything previously stored on
+/// device across on first launch.
 struct DrawView: View {
+    /// Only still here so the one-time migration can read the old local
+    /// store. Nothing in this view writes to it.
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \Deck.createdAt, order: .reverse) private var decks: [Deck]
-    @Query(sort: \Entry.occurredAt, order: .reverse) private var entries: [Entry]
-    // Explicit sort so "which chart is the chart" is deterministic — an
-    // unsorted @Query was part of the duplicate-chart bug.
-    @Query(sort: \NatalChart.createdAt) private var charts: [NatalChart]
+
+    @State private var decks: [RemoteDeck] = []
+    @State private var chart: RemoteNatalChart?
+    @State private var todaysEntry: EntryWithDraws?
+    @State private var status = ""
+    @State private var isLoading = true
 
     @State private var isCreatingDeck = false
     @State private var isSettingUpChart = false
     @State private var isPickingCard = false
-    @State private var selectedDeck: Deck?
+    @State private var selectedDeck: RemoteDeck?
 
     @State private var selectedCard: TarotCard?
     @State private var isReversed = false
@@ -26,12 +34,7 @@ struct DrawView: View {
 
     @State private var eveningReflection = ""
     @State private var isConfirmingClear = false
-
-    private var chart: NatalChart? { charts.first }
-
-    private var todaysEntry: Entry? {
-        entries.first { Calendar.current.isDateInToday($0.occurredAt) }
-    }
+    @State private var isSaving = false
 
     var body: some View {
         NavigationStack {
@@ -39,37 +42,45 @@ struct DrawView: View {
                 VStack(alignment: .leading, spacing: 22) {
                     header
 
-                    if decks.isEmpty {
+                    if isLoading {
+                        ProgressView().tint(KadenceTheme.textPrimary)
+                    } else if decks.isEmpty {
                         noDeckState
-                    } else if let entry = todaysEntry, entry.skipped {
+                    } else if let entry = todaysEntry, entry.entry.skipped {
                         skippedState(entry)
                     } else if let entry = todaysEntry, entry.dailyDraw != nil {
                         eveningPhase(entry)
                     } else {
                         morningPhase
                     }
+
+                    if !status.isEmpty {
+                        Text(status)
+                            .font(KadenceTheme.bodyFont(12))
+                            .foregroundStyle(KadenceTheme.ariesEmber)
+                    }
                 }
                 .padding()
             }
             .background(KadenceTheme.bg.ignoresSafeArea())
+            .refreshable { await load() }
             .navigationBarTitleDisplayMode(.inline)
         }
         .preferredColorScheme(.dark)
-        .onAppear {
-            if selectedDeck == nil {
-                selectedDeck = entries.first?.deck ?? decks.first
-            }
-        }
+        .task { await load() }
         .sheet(isPresented: $isCreatingDeck) {
             DeckFormView { newDeck in
                 selectedDeck = newDeck
+                Task { await load() }
             }
         }
         .sheet(isPresented: $isSettingUpChart) {
-            NatalChartFormView(existingChart: chart, onSaved: {})
+            NatalChartFormView(existingChart: chart) {
+                Task { await load() }
+            }
         }
         .sheet(isPresented: $isPickingCard) {
-            CardPickerView(tradition: selectedDeck?.tradition ?? .rws) { card in
+            CardPickerView(tradition: selectedDeck?.traditionValue ?? .rws) { card in
                 selectedCard = card
             }
         }
@@ -123,7 +134,7 @@ struct DrawView: View {
                 Button {
                     isPickingCard = true
                 } label: {
-                    Text(selectedCard.map { $0.name(for: selectedDeck?.tradition ?? .rws) } ?? "Choose a card")
+                    Text(selectedCard.map { $0.name(for: selectedDeck?.traditionValue ?? .rws) } ?? "Choose a card")
                         .font(KadenceTheme.bodyFont(15))
                         .foregroundStyle(selectedCard == nil ? KadenceTheme.textMuted : KadenceTheme.textPrimary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -147,18 +158,24 @@ struct DrawView: View {
             labeledField("What do you think this is pointing at today?", placeholder: "One line", text: $morningLine)
 
             HStack(spacing: 12) {
-                Button("No pull today") { skipToday() }
+                Button("No pull today") { Task { await skipToday() } }
                     .font(KadenceTheme.bodyFont(14))
                     .foregroundStyle(KadenceTheme.textMuted)
 
                 Spacer()
 
-                Button("Save") { saveMorning() }
+                Button {
+                    Task { await saveMorning() }
+                } label: {
+                    Group {
+                        if isSaving { ProgressView() } else { Text("Save") }
+                    }
                     .frame(minWidth: 120, minHeight: 44)
-                    .background(canSaveMorning ? KadenceTheme.piscesTeal : KadenceTheme.surface)
-                    .foregroundStyle(canSaveMorning ? KadenceTheme.bg : KadenceTheme.textMuted)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .disabled(!canSaveMorning)
+                }
+                .background(canSaveMorning ? KadenceTheme.piscesTeal : KadenceTheme.surface)
+                .foregroundStyle(canSaveMorning ? KadenceTheme.bg : KadenceTheme.textMuted)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .disabled(!canSaveMorning || isSaving)
             }
         }
     }
@@ -229,7 +246,7 @@ struct DrawView: View {
 
     // MARK: - Evening
 
-    private func eveningPhase(_ entry: Entry) -> some View {
+    private func eveningPhase(_ entry: EntryWithDraws) -> some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(entry.dailyDraw?.cardName ?? "")
@@ -245,16 +262,15 @@ struct DrawView: View {
                         .font(KadenceTheme.bodyFont(12))
                         .foregroundStyle(KadenceTheme.textMuted)
                 }
-                if let line = entry.morningRead, !line.isEmpty {
+                if let line = entry.entry.morningRead, !line.isEmpty {
                     Text("\u{201C}\(line)\u{201D}")
                         .font(KadenceTheme.bodyFont(14))
                         .italic()
                         .foregroundStyle(KadenceTheme.piscesSeafoam.opacity(0.9))
                         .padding(.top, 4)
                 }
-                // Appears only after the morning line was written and saved
-                // — never before, per spec. Silent when the engine has
-                // nothing worth saying (see ResonanceEngine).
+                // Frozen at draw time, so it still reads as it did on the
+                // day even if the chart is corrected later.
                 if let note = entry.dailyDraw?.resonanceNote {
                     Text(note)
                         .font(KadenceTheme.bodyFont(13))
@@ -268,11 +284,18 @@ struct DrawView: View {
 
             labeledField("What happened? Does it read differently now?", placeholder: "Reflection", text: $eveningReflection)
 
-            Button("Save") { saveEvening(entry) }
+            Button {
+                Task { await saveEvening(entry) }
+            } label: {
+                Group {
+                    if isSaving { ProgressView() } else { Text("Save") }
+                }
                 .frame(maxWidth: .infinity, minHeight: 44)
-                .background(KadenceTheme.piscesTeal)
-                .foregroundStyle(KadenceTheme.bg)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .background(KadenceTheme.piscesTeal)
+            .foregroundStyle(KadenceTheme.bg)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .disabled(isSaving)
 
             // Escape hatch for logging out of order (e.g. drawing before
             // the chart was set, which freezes a resonance note of nil).
@@ -288,21 +311,20 @@ struct DrawView: View {
                     isPresented: $isConfirmingClear,
                     titleVisibility: .visible
                 ) {
-                    Button("Clear Today", role: .destructive) { clearToday(entry) }
+                    Button("Clear Today", role: .destructive) { Task { await clearToday(entry) } }
                     Button("Cancel", role: .cancel) {}
                 }
         }
-        .onAppear { eveningReflection = entry.eveningReflection ?? "" }
+        .onAppear { eveningReflection = entry.entry.eveningReflection ?? "" }
     }
 
-    private func skippedState(_ entry: Entry) -> some View {
+    private func skippedState(_ entry: EntryWithDraws) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("No pull today.")
                 .font(KadenceTheme.bodyFont(15))
                 .foregroundStyle(KadenceTheme.textMuted)
             Button("Actually, let me log one") {
-                entry.skipped = false
-                entry.updatedAt = Date()
+                Task { await unskip(entry) }
             }
             .font(KadenceTheme.bodyFont(14))
             .foregroundStyle(KadenceTheme.piscesTeal)
@@ -322,62 +344,175 @@ struct DrawView: View {
         }
     }
 
+    // MARK: - Load
+
+    private func load() async {
+        do {
+            // Runs at most once, and only while signed in. Non-destructive:
+            // the local copy is left alone. Errors are surfaced rather than
+            // swallowed — a migration that silently fails looks identical
+            // to one that had nothing to do, and the flag is only set on
+            // success, so a reported failure will retry next launch.
+            do {
+                if let moved = try await TarotMigrationService.migrateIfNeeded(context: modelContext), !moved.isEmpty {
+                    status = "Moved \(moved.entries) day(s), \(moved.decks) deck(s) and \(moved.charts) chart from this device."
+                }
+            } catch {
+                status = "Couldn't move this device's saved draws: \(error.localizedDescription). Your local copy is untouched; this will retry."
+            }
+
+            async let decksTask = DeckService.fetchActive()
+            async let chartTask = NatalChartService.fetch()
+            async let entryTask = EntryService.fetchForDate()
+
+            decks = try await decksTask
+            chart = try await chartTask
+            todaysEntry = try await entryTask
+
+            if selectedDeck == nil || !decks.contains(where: { $0.id == selectedDeck?.id }) {
+                selectedDeck = decks.first
+            }
+            isLoading = false
+        } catch is CancellationError {
+            return
+        } catch {
+            status = "Couldn't load: \(error.localizedDescription)"
+            isLoading = false
+        }
+    }
+
     // MARK: - Actions
 
-    private func saveMorning() {
+    private func saveMorning() async {
         guard let deck = selectedDeck, let card = selectedCard else { return }
-        let entry = todaysEntry ?? Entry(occurredAt: Calendar.current.startOfDay(for: Date()))
-        if todaysEntry == nil { modelContext.insert(entry) }
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            let userId = try await SupabaseService.shared.requireUserId()
+            let entry = try await EntryService.upsert(
+                EntryService.EntryInput(
+                    userId: userId,
+                    date: SupabaseDate.string(),
+                    deckId: deck.id,
+                    skipped: false,
+                    morningRead: morningLine.isEmpty ? nil : morningLine,
+                    eveningReflection: nil,
+                    updatedAt: Date()
+                )
+            )
 
-        entry.deck = deck
-        entry.morningRead = morningLine.isEmpty ? nil : morningLine
-        entry.skipped = false
-        entry.updatedAt = Date()
+            var resonanceTier: String?
+            var resonanceNote: String?
+            if let chart {
+                let result = ResonanceEngine.resonance(
+                    for: card,
+                    deckTradition: deck.traditionValue,
+                    chart: chart.placements
+                )
+                resonanceTier = result.tier.rawValue
+                resonanceNote = result.note
+            }
 
-        let daily = Draw(cardName: card.name(for: deck.tradition), cardID: card.id, role: .daily, reversed: isReversed)
-        if let chart {
-            let result = ResonanceEngine.resonance(for: card, deckTradition: deck.tradition, chart: chart)
-            daily.resonanceTier = result.tier.rawValue
-            daily.resonanceNote = result.note
+            var inputs = [EntryService.DrawInput(
+                userId: userId,
+                entryId: entry.id,
+                cardId: card.id,
+                cardName: card.name(for: deck.traditionValue),
+                role: .daily,
+                reversed: isReversed,
+                resonanceTier: resonanceTier,
+                resonanceNote: resonanceNote
+            )]
+            // Jumpers stay free text for now — resonance for them is
+            // deferred, not wired into this pass's UI.
+            inputs += jumperNames.map {
+                EntryService.DrawInput(
+                    userId: userId, entryId: entry.id, cardId: nil, cardName: $0,
+                    role: .jumper, reversed: false, resonanceTier: nil, resonanceNote: nil
+                )
+            }
+            try await EntryService.addDraws(inputs)
+
+            selectedCard = nil
+            isReversed = false
+            jumperNames = []
+            morningLine = ""
+            await load()
+        } catch {
+            status = "Couldn't save: \(error.localizedDescription)"
         }
-        entry.draws.append(daily)
-
-        // Jumpers stay free text for now — resonance for them is deferred,
-        // not wired into this pass's UI.
-        for jumper in jumperNames {
-            entry.draws.append(Draw(cardName: jumper, role: .jumper))
-        }
-
-        selectedCard = nil
-        isReversed = false
-        jumperNames = []
-        morningLine = ""
     }
 
-    private func saveEvening(_ entry: Entry) {
-        entry.eveningReflection = eveningReflection.isEmpty ? nil : eveningReflection
-        entry.updatedAt = Date()
+    private func saveEvening(_ entry: EntryWithDraws) async {
+        isSaving = true
+        defer { isSaving = false }
+        await patch(entry, eveningReflection: eveningReflection.isEmpty ? nil : eveningReflection)
     }
 
-    /// Deletes the whole Entry rather than just its draws — Entry's `draws`
-    /// relationship is .cascade, so this cleans up the Draw records too,
-    /// and dropping the row entirely puts the day back in the same state as
-    /// never having been logged (morningPhase), which is what "start over"
+    private func unskip(_ entry: EntryWithDraws) async {
+        await patch(entry, skipped: false)
+    }
+
+    /// Upsert carries every field, so anything not being changed has to be
+    /// passed through from the existing row rather than left out.
+    private func patch(
+        _ entry: EntryWithDraws,
+        skipped: Bool? = nil,
+        eveningReflection: String?? = nil
+    ) async {
+        do {
+            try await EntryService.upsert(
+                EntryService.EntryInput(
+                    userId: try await SupabaseService.shared.requireUserId(),
+                    date: entry.entry.date,
+                    deckId: entry.entry.deckId,
+                    skipped: skipped ?? entry.entry.skipped,
+                    morningRead: entry.entry.morningRead,
+                    eveningReflection: eveningReflection ?? entry.entry.eveningReflection,
+                    updatedAt: Date()
+                )
+            )
+            await load()
+        } catch {
+            status = "Couldn't save: \(error.localizedDescription)"
+        }
+    }
+
+    /// Deletes the whole row rather than just its draws — `draw.entry_id` is
+    /// `on delete cascade`, so this clears the draws too, and dropping the
+    /// row puts the day back to never-logged, which is what "start over"
     /// should mean.
-    private func clearToday(_ entry: Entry) {
-        modelContext.delete(entry)
-        selectedCard = nil
-        isReversed = false
-        jumperNames = []
-        morningLine = ""
-        eveningReflection = ""
+    private func clearToday(_ entry: EntryWithDraws) async {
+        do {
+            try await EntryService.deleteEntry(id: entry.entry.id)
+            selectedCard = nil
+            isReversed = false
+            jumperNames = []
+            morningLine = ""
+            eveningReflection = ""
+            await load()
+        } catch {
+            status = "Couldn't clear: \(error.localizedDescription)"
+        }
     }
 
-    private func skipToday() {
-        let entry = todaysEntry ?? Entry(occurredAt: Calendar.current.startOfDay(for: Date()))
-        if todaysEntry == nil { modelContext.insert(entry) }
-        entry.skipped = true
-        entry.updatedAt = Date()
+    private func skipToday() async {
+        do {
+            try await EntryService.upsert(
+                EntryService.EntryInput(
+                    userId: try await SupabaseService.shared.requireUserId(),
+                    date: SupabaseDate.string(),
+                    deckId: selectedDeck?.id,
+                    skipped: true,
+                    morningRead: nil,
+                    eveningReflection: nil,
+                    updatedAt: Date()
+                )
+            )
+            await load()
+        } catch {
+            status = "Couldn't save: \(error.localizedDescription)"
+        }
     }
 }
 
