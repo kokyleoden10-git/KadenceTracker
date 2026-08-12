@@ -5,6 +5,12 @@ import SwiftUI
 /// doc comment for why. Sign-only, no degrees: that's all the resonance
 /// engine's scoring actually needs.
 ///
+/// Birth date/time/place used to be typed here too, duplicating the same
+/// fields already collected in Settings → Profile. They're now read from
+/// the profile automatically and shown for reference only — nothing left
+/// to fill in here except the placements themselves, which still need a
+/// human source since there's no ephemeris computing them.
+///
 /// Acts as a singleton editor: if `existingChart` is passed in, every
 /// field is pre-populated from it and Save updates that same record in
 /// place. Without this, reopening the form always showed Aries defaults
@@ -30,11 +36,20 @@ struct NatalChartFormView: View {
     @State private var ascendant: ZodiacSign = .aries
     @State private var midheaven: ZodiacSign = .aries
 
+    /// Frozen snapshot of the profile's birth data at the moment this chart
+    /// was saved — sourced automatically, never typed. Spec's own logic for
+    /// why this needs to be frozen rather than a live read: "if a user later
+    /// corrects their birth time, past entries must still read as they did
+    /// on the day."
     @State private var birthDateDescription = ""
     @State private var birthTimeDescription = ""
     @State private var birthLocationDescription = ""
     @State private var isSaving = false
     @State private var status: String?
+
+    private var hasBirthDataOnFile: Bool {
+        !birthDateDescription.isEmpty || !birthLocationDescription.isEmpty
+    }
 
     var body: some View {
         NavigationStack {
@@ -43,6 +58,8 @@ struct NatalChartFormView: View {
                     Text("Enter the placements from a chart you already trust (astro.com, a prior reading). This app doesn't calculate charts itself.")
                         .font(KadenceTheme.bodyFont(13))
                         .foregroundStyle(KadenceTheme.textMuted)
+
+                    birthDataReference
 
                     signRow("Sun", $sun)
                     signRow("Moon", $moon)
@@ -56,12 +73,6 @@ struct NatalChartFormView: View {
                     signRow("Pluto", $pluto)
                     signRow("Ascendant", $ascendant)
                     signRow("Midheaven", $midheaven)
-
-                    Divider().overlay(KadenceTheme.textMuted.opacity(0.2))
-
-                    labeledField("Birth date (reference only)", text: $birthDateDescription)
-                    labeledField("Birth time (reference only)", text: $birthTimeDescription)
-                    labeledField("Birth place (reference only)", text: $birthLocationDescription)
 
                     Button { Task { await save() } } label: {
                         Group {
@@ -93,7 +104,35 @@ struct NatalChartFormView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .onAppear(perform: populateIfEditing)
+        .task { await populate() }
+    }
+
+    private var birthDataReference: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("FROM YOUR PROFILE")
+                .font(KadenceTheme.bodyFontSemibold(10))
+                .tracking(1.2)
+                .foregroundStyle(KadenceTheme.textMuted)
+            if hasBirthDataOnFile {
+                Text([birthDateDescription, birthTimeDescription, birthLocationDescription]
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " \u{00B7} "))
+                    .font(KadenceTheme.bodyFont(14))
+                    .foregroundStyle(KadenceTheme.textPrimary)
+                Text("Wrong? Edit it in Settings \u{2192} Profile.")
+                    .font(KadenceTheme.bodyFont(11))
+                    .foregroundStyle(KadenceTheme.textMuted)
+            } else {
+                Text("No birthdate or birth location on file yet. Add them in Settings \u{2192} Profile so this chart keeps a record of what it's based on. The placements below still come from a chart you trust either way — this app doesn't calculate them.")
+                    .font(KadenceTheme.bodyFont(12))
+                    .foregroundStyle(KadenceTheme.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(KadenceTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private func signRow(_ label: String, _ selection: Binding<ZodiacSign>) -> some View {
@@ -114,36 +153,43 @@ struct NatalChartFormView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
-    private func labeledField(_ label: String, text: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(KadenceTheme.bodyFont(12))
-                .foregroundStyle(KadenceTheme.textMuted)
-            TextField(label, text: text)
-                .padding(10)
-                .background(KadenceTheme.surface)
-                .foregroundStyle(KadenceTheme.textPrimary)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+    private func populate() async {
+        if let chart = existingChart {
+            sun = chart.sun
+            moon = chart.moon
+            mercury = chart.mercury
+            venus = chart.venus
+            mars = chart.mars
+            jupiter = chart.jupiter
+            saturn = chart.saturn
+            uranus = chart.uranus
+            neptune = chart.neptune
+            pluto = chart.pluto
+            ascendant = chart.ascendant
+            midheaven = chart.midheaven
         }
-    }
 
-    private func populateIfEditing() {
-        guard let chart = existingChart else { return }
-        sun = chart.sun
-        moon = chart.moon
-        mercury = chart.mercury
-        venus = chart.venus
-        mars = chart.mars
-        jupiter = chart.jupiter
-        saturn = chart.saturn
-        uranus = chart.uranus
-        neptune = chart.neptune
-        pluto = chart.pluto
-        ascendant = chart.ascendant
-        midheaven = chart.midheaven
-        birthDateDescription = chart.birthDateDescription ?? ""
-        birthTimeDescription = chart.birthTimeDescription ?? ""
-        birthLocationDescription = chart.birthLocationDescription ?? ""
+        // Always sourced fresh from the profile rather than kept from
+        // whenever the chart was last saved — this is just a reference
+        // label, not the frozen resonance notes on past draws, so there's
+        // no reason to let it drift from what the profile actually says.
+        guard let profile = try? await ProfileService.fetchCurrent() else { return }
+
+        if let birthdate = profile.birthdate {
+            let input = DateFormatter()
+            input.dateFormat = "yyyy-MM-dd"
+            let output = DateFormatter()
+            output.dateFormat = "MMM d, yyyy"
+            birthDateDescription = input.date(from: birthdate).map { output.string(from: $0) } ?? birthdate
+        }
+        if let birthTime = profile.birthTime {
+            let input = DateFormatter()
+            input.dateFormat = "HH:mm:ss"
+            let output = DateFormatter()
+            output.dateFormat = "h:mm a"
+            birthTimeDescription = input.date(from: birthTime).map { output.string(from: $0) } ?? birthTime
+        }
+        birthLocationDescription = profile.birthLocation ?? ""
     }
 
     /// Upserts on user_id, which is the table's primary key — editing
