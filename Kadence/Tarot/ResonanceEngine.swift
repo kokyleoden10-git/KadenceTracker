@@ -175,13 +175,31 @@ enum ResonanceEngine {
         return standing(of: cardModality, tally: chart.modalityTally) { $0.displayName }
     }
 
-    private static func phrase(_ standing: Standing, kind: String) -> String {
+    /// Element phrasing calls out "its own" and modality doesn't, because
+    /// they're not equally unambiguous. A numbered/Ace's element is just
+    /// its suit (Wands is Fire, full stop), but a court card's element
+    /// comes from its *rank* under the classical elemental-dignities
+    /// scheme — Princess is always Earth regardless of suit. Stated bare
+    /// ("Earth is your rarest element") next to a Wands card, that reads as
+    /// a Fire/Earth contradiction; "its own element" makes clear it's the
+    /// card's, not the suit's.
+    private static func elementPhrase(_ standing: Standing) -> String {
         let total = ChartPlacements.talliedPointCount
         switch standing {
         case .densest(let name, let count):
-            return "\(name) is your densest \(kind) \u{2014} \(count) of \(total)."
+            return "\(name) \u{2014} its own element \u{2014} is your densest, \(count) of \(total)."
         case .rarest(let name, let count):
-            return "\(name) is your rarest \(kind) \u{2014} \(count) of \(total)."
+            return "\(name) \u{2014} its own element \u{2014} is your rarest, \(count) of \(total)."
+        }
+    }
+
+    private static func modalityPhrase(_ standing: Standing) -> String {
+        let total = ChartPlacements.talliedPointCount
+        switch standing {
+        case .densest(let name, let count):
+            return "\(name) is your densest modality \u{2014} \(count) of \(total)."
+        case .rarest(let name, let count):
+            return "\(name) is your rarest modality \u{2014} \(count) of \(total)."
         }
     }
 
@@ -205,10 +223,10 @@ enum ResonanceEngine {
             return "\(rulerMatch.displayName) rules your \(ascendantSign) Ascendant."
         }
         if let elementStanding {
-            return phrase(elementStanding, kind: "element")
+            return elementPhrase(elementStanding)
         }
         if let modalityStanding {
-            return phrase(modalityStanding, kind: "modality")
+            return modalityPhrase(modalityStanding)
         }
         return nil
     }

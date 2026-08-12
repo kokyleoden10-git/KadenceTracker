@@ -31,6 +31,7 @@ struct TidesView: View {
     /// SwiftData @Query, which went stale the moment charts moved and made a
     /// configured chart look unset.
     @State private var chart: RemoteNatalChart?
+    @State private var profile: Profile?
 
     @State private var bins: [LunarBin] = []
     @State private var observedDays = 0
@@ -116,10 +117,15 @@ struct TidesView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("TIDES")
+            Text(KadenceTheme.personalizedTitle(nickname: profile?.nickname, screen: "Tides"))
                 .font(KadenceTheme.bodyFontSemibold(12))
                 .tracking(1.4)
+                .textCase(.uppercase)
                 .foregroundStyle(KadenceTheme.textMuted)
+            // No date line here, unlike Today/Draw — Tides is the one
+            // screen that's explicitly about the aggregate shape across
+            // many days, not a single one, so anchoring it to today's date
+            // would be the wrong emphasis.
             Text("Across the lunar cycle")
                 .font(KadenceTheme.displayFont(28))
                 .foregroundStyle(KadenceTheme.textPrimary)
@@ -518,6 +524,7 @@ struct TidesView: View {
                 }
 
                 chart = try await NatalChartService.fetch()
+                profile = try await ProfileService.fetchCurrent()
 
                 // Card draws, marked but never counted as volume — a draw
                 // isn't a habit completion, and blending them would make the

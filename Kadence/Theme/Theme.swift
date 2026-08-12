@@ -56,4 +56,15 @@ enum KadenceTheme {
     static func bodyFontSemibold(_ size: CGFloat = 16) -> Font {
         .custom("Inter-SemiBold", size: size)
     }
+
+    /// Shared across every tab's header (Today, Draw, Tides) so the
+    /// personalized-title pattern — "{nickname}'s {screen}", falling back
+    /// to just the screen name — stays identical everywhere instead of
+    /// three separately-drifting implementations.
+    static func personalizedTitle(nickname: String?, screen: String) -> String {
+        if let nickname, !nickname.isEmpty {
+            return "\(nickname)'s \(screen)"
+        }
+        return screen
+    }
 }

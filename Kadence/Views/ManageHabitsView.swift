@@ -16,6 +16,13 @@ struct ManageHabitsView: View {
     @State private var formMode: HabitFormView.Mode?
     @Environment(\.dismiss) private var dismiss
 
+    @AppStorage("permanentDeletionEnabled") private var permanentDeletionEnabled = false
+    @State private var isSelecting = false
+    @State private var selectedIDs: Set<UUID> = []
+    @State private var isConfirmingBulkArchive = false
+    @State private var isConfirmingBulkDelete = false
+    @State private var isBulkActing = false
+
     private var visibleHabits: [Habit] {
         scope == .active ? activeHabits : archivedHabits
     }
@@ -31,17 +38,24 @@ struct ManageHabitsView: View {
                             ForEach(Scope.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                         }
                         .pickerStyle(.segmented)
+                        .onChange(of: scope) { _, _ in selectedIDs = [] }
+
+                        selectionActionBar
 
                         if visibleHabits.isEmpty && status.isEmpty {
                             emptyState
                         } else {
                             VStack(spacing: 8) {
                                 ForEach(visibleHabits) { habit in
-                                    HabitRow(
-                                        habit: habit,
-                                        action: { formMode = .edit(habit) },
-                                        unarchiveAction: scope == .archived ? { unarchive(habit) } : nil
-                                    )
+                                    if isSelecting {
+                                        selectableRow(habit)
+                                    } else {
+                                        HabitRow(
+                                            habit: habit,
+                                            action: { formMode = .edit(habit) },
+                                            unarchiveAction: scope == .archived ? { unarchive(habit) } : nil
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -59,17 +73,32 @@ struct ManageHabitsView: View {
             .navigationTitle("Manage Habits")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        formMode = .create
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .foregroundStyle(KadenceTheme.piscesTeal)
-                    }
-                }
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
-                        .foregroundStyle(KadenceTheme.textMuted)
+                    Button(isSelecting ? "Cancel" : "Done") {
+                        if isSelecting {
+                            isSelecting = false
+                            selectedIDs = []
+                        } else {
+                            dismiss()
+                        }
+                    }
+                    .foregroundStyle(KadenceTheme.textMuted)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if !isSelecting {
+                        HStack(spacing: 16) {
+                            if !visibleHabits.isEmpty {
+                                Button("Select") { isSelecting = true }
+                                    .foregroundStyle(KadenceTheme.piscesTeal)
+                            }
+                            Button {
+                                formMode = .create
+                            } label: {
+                                Image(systemName: "plus.circle.fill")
+                                    .foregroundStyle(KadenceTheme.piscesTeal)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -78,6 +107,84 @@ struct ManageHabitsView: View {
         .sheet(item: $formMode) { mode in
             HabitFormView(mode: mode) {
                 Task { await load() }
+            }
+        }
+        .confirmationDialog(
+            "Archive \(selectedIDs.count) habit\(selectedIDs.count == 1 ? "" : "s")? \(selectedIDs.count == 1 ? "It" : "They") will stop showing up, but past log history is kept, not deleted.",
+            isPresented: $isConfirmingBulkArchive,
+            titleVisibility: .visible
+        ) {
+            Button("Archive", role: .destructive) { Task { await bulkArchive() } }
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog(
+            "Permanently delete \(selectedIDs.count) habit\(selectedIDs.count == 1 ? "" : "s") and every entry ever logged for \(selectedIDs.count == 1 ? "it" : "them")? This cannot be undone.",
+            isPresented: $isConfirmingBulkDelete,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Forever", role: .destructive) { Task { await bulkDelete() } }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    /// A lighter row than HabitRow for selection mode — a leading checkbox
+    /// in place of the chevron/restore affordance, and tapping anywhere
+    /// toggles selection instead of opening the edit form.
+    private func selectableRow(_ habit: Habit) -> some View {
+        let isSelected = selectedIDs.contains(habit.id)
+        return Button {
+            if isSelected { selectedIDs.remove(habit.id) } else { selectedIDs.insert(habit.id) }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isSelected ? KadenceTheme.piscesTeal : KadenceTheme.textMuted)
+                Circle()
+                    .fill(KadenceTheme.color(for: habit.domain))
+                    .frame(width: 10, height: 10)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(habit.name)
+                        .font(KadenceTheme.bodyFont(15))
+                        .foregroundStyle(KadenceTheme.textPrimary)
+                    Text(habit.tier == .anchor ? "Anchor" : "Practice")
+                        .font(KadenceTheme.bodyFont(11))
+                        .foregroundStyle(KadenceTheme.textMuted)
+                }
+                Spacer()
+            }
+            .padding(12)
+            .background(KadenceTheme.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var selectionActionBar: some View {
+        if isSelecting {
+            HStack(spacing: 14) {
+                Text(selectedIDs.isEmpty ? "Select habits to archive or delete" : "\(selectedIDs.count) selected")
+                    .font(KadenceTheme.bodyFont(13))
+                    .foregroundStyle(KadenceTheme.textMuted)
+                Spacer()
+                if !selectedIDs.isEmpty {
+                    if scope == .active {
+                        Button("Archive") { isConfirmingBulkArchive = true }
+                            .font(KadenceTheme.bodyFontSemibold(13))
+                            .foregroundStyle(KadenceTheme.ariesEmber)
+                    }
+                    if permanentDeletionEnabled {
+                        Button("Delete") { isConfirmingBulkDelete = true }
+                            .font(KadenceTheme.bodyFontSemibold(13))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(KadenceTheme.ariesEmber)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+                if isBulkActing {
+                    ProgressView().tint(KadenceTheme.textMuted)
+                }
             }
         }
     }
@@ -133,6 +240,28 @@ struct ManageHabitsView: View {
                 status = "Couldn't restore: \(error.localizedDescription)"
             }
         }
+    }
+
+    private func bulkArchive() async {
+        isBulkActing = true
+        defer { isBulkActing = false }
+        for id in selectedIDs {
+            try? await HabitService.archive(id)
+        }
+        isSelecting = false
+        selectedIDs = []
+        await load()
+    }
+
+    private func bulkDelete() async {
+        isBulkActing = true
+        defer { isBulkActing = false }
+        for id in selectedIDs {
+            try? await HabitService.delete(id)
+        }
+        isSelecting = false
+        selectedIDs = []
+        await load()
     }
 }
 

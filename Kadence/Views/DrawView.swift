@@ -17,6 +17,7 @@ struct DrawView: View {
 
     @State private var decks: [RemoteDeck] = []
     @State private var chart: RemoteNatalChart?
+    @State private var profile: Profile?
     @State private var todaysEntry: EntryWithDraws?
     @State private var status = ""
     /// Kept separate from `status`: a successful migration was rendering in
@@ -116,9 +117,10 @@ struct DrawView: View {
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("DRAW")
+                Text(KadenceTheme.personalizedTitle(nickname: profile?.nickname, screen: "Draw"))
                     .font(KadenceTheme.bodyFontSemibold(12))
                     .tracking(1.4)
+                    .textCase(.uppercase)
                     .foregroundStyle(KadenceTheme.textMuted)
                 Text(Date(), style: .date)
                     .font(KadenceTheme.displayFont(28))
@@ -427,10 +429,12 @@ struct DrawView: View {
             async let decksTask = DeckService.fetchActive()
             async let chartTask = NatalChartService.fetch()
             async let entryTask = EntryService.fetchForDate()
+            async let profileTask = ProfileService.fetchCurrent()
 
             decks = try await decksTask
             chart = try await chartTask
             todaysEntry = try await entryTask
+            profile = try await profileTask
 
             if selectedDeck == nil || !decks.contains(where: { $0.id == selectedDeck?.id }) {
                 selectedDeck = decks.first

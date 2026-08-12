@@ -21,6 +21,7 @@ struct HomeView: View {
     private var groupMode: HabitGroupMode { HabitGroupMode(rawValue: groupModeRaw) ?? .none }
 
     @State private var isManagingHabits = false
+    @State private var isCreatingHabit = false
     @State private var editHabit: Habit?
     @State private var detailHabit: Habit?
     @State private var detailNote = ""
@@ -69,6 +70,13 @@ struct HomeView: View {
                         .listRowSeparator(.hidden)
                         .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 16, trailing: 16))
                 } else {
+                    if !todaysHabits.isEmpty {
+                        sortControl
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 2, trailing: 16))
+                    }
+
                     ForEach(groupedSections, id: \.title) { section in
                         if !section.title.isEmpty {
                             HStack(spacing: 6) {
@@ -115,18 +123,6 @@ struct HomeView: View {
             .background(KadenceTheme.bg.ignoresSafeArea())
             .refreshable { await load() }
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Menu {
-                        Picker("Sort", selection: $groupModeRaw) {
-                            ForEach(HabitGroupMode.allCases, id: \.self) { mode in
-                                Text(mode.rawValue).tag(mode.rawValue)
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "arrow.up.arrow.down.circle")
-                            .foregroundStyle(KadenceTheme.piscesTeal)
-                    }
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         isManagingHabits = true
@@ -140,6 +136,11 @@ struct HomeView: View {
         .task { await load() }
         .sheet(isPresented: $isManagingHabits, onDismiss: { Task { await load() } }) {
             ManageHabitsView()
+        }
+        .sheet(isPresented: $isCreatingHabit) {
+            HabitFormView(mode: .create) {
+                Task { await load() }
+            }
         }
         .sheet(item: $editHabit) { habit in
             HabitFormView(mode: .edit(habit)) {
@@ -158,6 +159,11 @@ struct HomeView: View {
         }
     }
 
+    /// The primary action here is always a direct, one-tap route to the
+    /// create form — never a stop at Manage Habits first. That used to be
+    /// a real double-click bug: this button opened the (empty) Manage
+    /// Habits list, which still required tapping its own "+" to actually
+    /// reach the form.
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Nothing scheduled for today.")
@@ -165,15 +171,45 @@ struct HomeView: View {
                 .foregroundStyle(KadenceTheme.textMuted)
 
             Button {
-                isManagingHabits = true
+                isCreatingHabit = true
             } label: {
-                Text(habits.isEmpty ? "Add your first habit" : "Manage habits")
+                Text(habits.isEmpty ? "Add your first habit" : "Add New Habit")
                     .font(KadenceTheme.bodyFontSemibold(15))
                     .frame(maxWidth: .infinity, minHeight: 44)
             }
             .background(KadenceTheme.piscesTeal)
             .foregroundStyle(KadenceTheme.bg)
             .clipShape(RoundedRectangle(cornerRadius: 10))
+
+            if !habits.isEmpty {
+                Button("Manage habits") { isManagingHabits = true }
+                    .font(KadenceTheme.bodyFont(13))
+                    .foregroundStyle(KadenceTheme.textMuted)
+            }
+        }
+    }
+
+    /// Sits directly above the list it sorts, rather than off in the nav
+    /// bar where its purpose was unclear — and only appears when there's
+    /// something to sort at all.
+    private var sortControl: some View {
+        HStack {
+            Spacer()
+            Menu {
+                Picker("Sort", selection: $groupModeRaw) {
+                    ForEach(HabitGroupMode.allCases, id: \.self) { mode in
+                        Text(mode.rawValue).tag(mode.rawValue)
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.caption2)
+                    Text(groupMode.rawValue)
+                        .font(KadenceTheme.bodyFont(12))
+                }
+                .foregroundStyle(KadenceTheme.piscesTeal)
+            }
         }
     }
 

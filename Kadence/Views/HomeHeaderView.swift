@@ -12,10 +12,7 @@ struct HomeHeaderView: View {
     @State private var weatherStatus: String?
 
     private var title: String {
-        if let nickname = profile?.nickname, !nickname.isEmpty {
-            return "\(nickname)'s Kadence"
-        }
-        return "Kadence"
+        KadenceTheme.personalizedTitle(nickname: profile?.nickname, screen: "Kadence")
     }
 
     private var dateHeading: String {
