@@ -88,6 +88,21 @@ enum EntryService {
         return entry
     }
 
+    /// Updates just the given fields on an existing entry, preserving the
+    /// rest — shared by today's flow in DrawView and by History's
+    /// retroactive reflections, which only ever touch eveningReflection.
+    static func patch(_ entry: RemoteEntry, skipped: Bool? = nil, eveningReflection: String?? = nil) async throws {
+        try await upsert(EntryInput(
+            userId: entry.userId,
+            date: entry.date,
+            deckId: entry.deckId,
+            skipped: skipped ?? entry.skipped,
+            morningRead: entry.morningRead,
+            eveningReflection: eveningReflection ?? entry.eveningReflection,
+            updatedAt: Date()
+        ))
+    }
+
     struct DrawInput: Encodable {
         var userId: UUID
         var entryId: UUID

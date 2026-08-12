@@ -32,6 +32,7 @@ struct DrawView: View {
 
     @State private var isCreatingDeck = false
     @State private var isPickingCard = false
+    @State private var isShowingHistory = false
     @State private var selectedDeck: RemoteDeck?
 
     @State private var selectedCard: TarotCard?
@@ -83,9 +84,22 @@ struct DrawView: View {
             .background(KadenceTheme.bg.ignoresSafeArea())
             .refreshable { await load() }
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        isShowingHistory = true
+                    } label: {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .foregroundStyle(KadenceTheme.piscesTeal)
+                    }
+                }
+            }
         }
         .preferredColorScheme(.dark)
         .task { await load() }
+        .sheet(isPresented: $isShowingHistory) {
+            HistoryView()
+        }
         .sheet(isPresented: $isCreatingDeck) {
             DeckFormView { newDeck in
                 selectedDeck = newDeck
@@ -523,17 +537,7 @@ struct DrawView: View {
         eveningReflection: String?? = nil
     ) async {
         do {
-            try await EntryService.upsert(
-                EntryService.EntryInput(
-                    userId: try await SupabaseService.shared.requireUserId(),
-                    date: entry.entry.date,
-                    deckId: entry.entry.deckId,
-                    skipped: skipped ?? entry.entry.skipped,
-                    morningRead: entry.entry.morningRead,
-                    eveningReflection: eveningReflection ?? entry.entry.eveningReflection,
-                    updatedAt: Date()
-                )
-            )
+            try await EntryService.patch(entry.entry, skipped: skipped, eveningReflection: eveningReflection)
             await load()
         } catch {
             status = "Couldn't save: \(error.localizedDescription)"
