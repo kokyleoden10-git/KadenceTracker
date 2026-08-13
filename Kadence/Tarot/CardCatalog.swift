@@ -121,6 +121,46 @@ struct TarotCard: Identifiable, Hashable {
         return value
     }
 
+    /// Tier 1 — spec's "always visible, no lock" plain attribution facts
+    /// (sign, planet, decan, element), the same shape as the spec's own
+    /// example: "9 of Cups — Pisces, second decan. Jupiter. Water." Never
+    /// repeats the card's name, since that's already the heading wherever
+    /// this is shown.
+    ///
+    /// This exists because the personalized resonance note alone reads as
+    /// meaningless without it — "Cardinal is your rarest modality" means
+    /// nothing until you know the card itself is Libra, a Cardinal sign.
+    /// This line is what makes the note legible, shown unconditionally
+    /// rather than only when resonance happens to fire.
+    var attributionLine: String {
+        var parts: [String] = []
+
+        if let suit, number == 1 {
+            parts.append("Root of \(suit.element.displayName)")
+        } else if let suit, let number, (2...10).contains(number), let sign = signs.first {
+            let ordinal = ["first", "second", "third"][(number - 2) % 3]
+            parts.append("\(sign.displayName), \(ordinal) decan")
+        } else if signs.count > 1 {
+            parts.append(signs.map(\.displayName).joined(separator: "\u{2013}"))
+        } else if let sign = signs.first {
+            parts.append(sign.displayName)
+        }
+
+        if !planets.isEmpty {
+            parts.append(planets.map(\.displayName).joined(separator: "/"))
+        }
+
+        // Element is folded into "Root of X" for Aces already, so skip it
+        // there — everywhere else with a suit (numbered minors, courts) it
+        // states separately, matching spec's own worked example verbatim:
+        // "9 of Cups — Pisces, second decan. Jupiter. Water."
+        if let element, suit != nil, number != 1 {
+            parts.append(element.displayName)
+        }
+
+        return parts.joined(separator: ". ")
+    }
+
     /// Everything a query can match against, lowercased. Covers spelled-out
     /// numbers ("six of cups"), bare numbers (a Major by its arcana number,
     /// or every pip of that rank), roman numerals as Majors are

@@ -158,6 +158,12 @@ private struct PastReflectionSheet: View {
                             .font(KadenceTheme.bodyFont(12))
                             .foregroundStyle(KadenceTheme.textMuted)
                     }
+                    if let attribution = entry.dailyDraw?.card?.attributionLine {
+                        Text(attribution)
+                            .font(KadenceTheme.bodyFont(12))
+                            .foregroundStyle(KadenceTheme.textMuted)
+                            .padding(.top, 2)
+                    }
                     if let line = entry.entry.morningRead, !line.isEmpty {
                         Text("\u{201C}\(line)\u{201D}")
                             .font(KadenceTheme.bodyFont(14))

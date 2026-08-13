@@ -317,6 +317,17 @@ struct DrawView: View {
                     .font(KadenceTheme.bodyFont(12))
                     .foregroundStyle(KadenceTheme.textMuted)
             }
+            // Tier 1 (spec's Reference tiers) — plain attribution facts,
+            // always shown, no personalization. Shown before the resonance
+            // note on purpose: "Cardinal is your rarest modality" means
+            // nothing until you know the card itself is Libra.
+            if let attribution = entry.dailyDraw?.card?.attributionLine {
+                Text(attribution)
+                    .font(KadenceTheme.bodyFont(12))
+                    .foregroundStyle(KadenceTheme.textMuted)
+                    .padding(.top, 4)
+            }
+
             if let line = entry.entry.morningRead, !line.isEmpty {
                 Text("\u{201C}\(line)\u{201D}")
                     .font(KadenceTheme.bodyFont(14))
@@ -325,9 +336,11 @@ struct DrawView: View {
                     .padding(.top, 4)
             }
             // Frozen at draw time, so it still reads as it did on the day
-            // even if the chart is corrected later.
+            // even if the chart is corrected later. Its own label makes
+            // clear this line is personalized, unlike the attribution
+            // above it.
             if let note = entry.dailyDraw?.resonanceNote {
-                Text(note)
+                Text("Yours: \(note)")
                     .font(KadenceTheme.bodyFont(13))
                     .foregroundStyle(KadenceTheme.piscesTeal)
                     .padding(.top, 6)
