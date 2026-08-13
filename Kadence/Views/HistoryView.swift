@@ -47,8 +47,14 @@ struct HistoryView: View {
         }
     }
 
+    /// Every day with a card is tappable, reflected or not — reviewing a
+    /// finished day used to be a dead end (nothing happened on tap), which
+    /// read as the entry having quietly disappeared even though it was
+    /// still there. Only skipped days stay inert, since there's nothing to
+    /// open.
     private func row(_ entry: EntryWithDraws) -> some View {
         let needsReflection = isNeedingReflection(entry)
+        let isReviewable = !entry.entry.skipped && entry.dailyDraw != nil
 
         let content = HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
@@ -62,13 +68,18 @@ struct HistoryView: View {
             }
             Spacer(minLength: 8)
             statusBadge(entry, needsReflection: needsReflection)
+            if isReviewable {
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(KadenceTheme.textMuted.opacity(0.5))
+            }
         }
         .padding(12)
         .background(KadenceTheme.surface)
         .clipShape(RoundedRectangle(cornerRadius: 10))
 
         return Group {
-            if needsReflection {
+            if isReviewable {
                 Button {
                     reflectingEntry = entry
                 } label: {
@@ -135,9 +146,11 @@ struct HistoryView: View {
     }
 }
 
-/// Reflecting on a day after the fact — same question DrawView asks in the
-/// evening ("what happened, does it read differently now?"), just reached
-/// from History instead of from today's ritual.
+/// Doubles as both the retroactive-reflection form and the plain review
+/// view for an already-finished day — the same sheet either way, just
+/// pre-filled with whatever reflection already exists. Tapping Cancel
+/// leaves it untouched, so opening this to look back at a day never
+/// requires editing it.
 private struct PastReflectionSheet: View {
     let entry: EntryWithDraws
 
@@ -170,6 +183,14 @@ private struct PastReflectionSheet: View {
                             .italic()
                             .foregroundStyle(KadenceTheme.piscesSeafoam.opacity(0.9))
                             .padding(.top, 4)
+                    }
+                    // Frozen at draw time — reads as it did on the day even
+                    // if the chart's since been corrected.
+                    if let note = entry.dailyDraw?.resonanceNote {
+                        Text("Yours: \(note)")
+                            .font(KadenceTheme.bodyFont(13))
+                            .foregroundStyle(KadenceTheme.piscesTeal)
+                            .padding(.top, 6)
                     }
                 }
                 .padding(14)
@@ -221,6 +242,7 @@ private struct PastReflectionSheet: View {
             }
         }
         .preferredColorScheme(.dark)
+        .onAppear { reflection = entry.entry.eveningReflection ?? "" }
     }
 
     private func save() async {

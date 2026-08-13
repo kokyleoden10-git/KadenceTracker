@@ -113,9 +113,7 @@ enum ResonanceEngine {
         }
 
         let elementStanding = notableElement(for: card, chart: chart)
-        let modalityStanding = notableModality(for: card, chart: chart)
         if elementStanding != nil { score += 2 }
-        if modalityStanding != nil { score += 1 }
 
         let tier: ResonanceTier
         switch score {
@@ -129,8 +127,7 @@ enum ResonanceEngine {
             pointsInSign: pointsInSign,
             rulerMatch: rulerMatch,
             ascendantSign: chart.ascendant.displayName,
-            elementStanding: elementStanding,
-            modalityStanding: modalityStanding
+            elementStanding: elementStanding
         )
         return ResonanceResult(tier: tier, note: note)
     }
@@ -145,9 +142,17 @@ enum ResonanceEngine {
         case rarest(String, Int)
     }
 
-    /// Majors carry no explicit element/modality in the catalog, so derive
-    /// both from the card's sign when present. Aces have an element but no
-    /// sign, which is the case spec singles out for element treatment.
+    /// Majors carry no explicit element in the catalog, so derive it from
+    /// the card's sign when present. Aces have an element but no sign,
+    /// which is the case spec singles out for element treatment.
+    ///
+    /// Modality-based standing used to exist alongside this (Cardinal/
+    /// Fixed/Mutable), and was removed: a modality note ("Cardinal is your
+    /// rarest modality") requires already knowing modality-of-sign from
+    /// memory, since nothing on screen ever states a card's modality —
+    /// unlike sign, planet, and element, which are all directly visible on
+    /// the attribution line above this note. A note that only resolves via
+    /// outside knowledge isn't legible, so it's gone rather than explained.
     private static func standing<Q: Hashable>(
         of quality: Q?, tally: [Q: Int], name: (Q) -> String
     ) -> Standing? {
@@ -170,19 +175,11 @@ enum ResonanceEngine {
         return standing(of: cardElement, tally: chart.elementTally) { $0.displayName }
     }
 
-    private static func notableModality(for card: TarotCard, chart: ChartPlacements) -> Standing? {
-        let cardModality = card.signs.first.map(modality(of:))
-        return standing(of: cardModality, tally: chart.modalityTally) { $0.displayName }
-    }
-
-    /// Element phrasing calls out "its own" and modality doesn't, because
-    /// they're not equally unambiguous. A numbered/Ace's element is just
-    /// its suit (Wands is Fire, full stop), but a court card's element
-    /// comes from its *rank* under the classical elemental-dignities
-    /// scheme — Princess is always Earth regardless of suit. Stated bare
-    /// ("Earth is your rarest element") next to a Wands card, that reads as
-    /// a Fire/Earth contradiction; "its own element" makes clear it's the
-    /// card's, not the suit's.
+    /// "Its own element" rather than stating the element bare, because a
+    /// court card's element comes from its *rank* under the classical
+    /// elemental-dignities scheme (Princess is always Earth regardless of
+    /// suit) — stated bare next to a Wands card, "Earth is your rarest
+    /// element" reads as a Fire/Earth contradiction.
     private static func elementPhrase(_ standing: Standing) -> String {
         let total = ChartPlacements.talliedPointCount
         switch standing {
@@ -193,28 +190,18 @@ enum ResonanceEngine {
         }
     }
 
-    private static func modalityPhrase(_ standing: Standing) -> String {
-        let total = ChartPlacements.talliedPointCount
-        switch standing {
-        case .densest(let name, let count):
-            return "\(name) is your densest modality \u{2014} \(count) of \(total)."
-        case .rarest(let name, let count):
-            return "\(name) is your rarest modality \u{2014} \(count) of \(total)."
-        }
-    }
-
     /// Affirming only, and never repeats the card's name — the card title
-    /// is already the heading directly above this note in the UI.
-    ///
-    /// Every case here states something the chart actually *has*, and how
-    /// much of it. Nothing fires for a quality the chart lacks, so silence
-    /// carries the "no connection today" meaning by itself, which also
-    /// keeps spec's "silence is a feature" rule intact: element/modality
-    /// only speak when singularly densest or rarest, never on a mere match.
+    /// is already the heading directly above this note in the UI. Every
+    /// case here states something the chart actually *has*, and how much
+    /// of it, and — now that modality is gone — resolves entirely from
+    /// facts already visible on the attribution line right above it.
+    /// Nothing fires for a quality the chart lacks, so silence carries the
+    /// "no connection today" meaning by itself, keeping spec's "silence is
+    /// a feature" rule intact.
     private static func noteText(
         matchedSign: String?, pointsInSign: [String],
         rulerMatch: Planet?, ascendantSign: String,
-        elementStanding: Standing?, modalityStanding: Standing?
+        elementStanding: Standing?
     ) -> String? {
         if !pointsInSign.isEmpty, let matchedSign {
             return "Your \(list(pointsInSign)) in \(matchedSign)."
@@ -224,9 +211,6 @@ enum ResonanceEngine {
         }
         if let elementStanding {
             return elementPhrase(elementStanding)
-        }
-        if let modalityStanding {
-            return modalityPhrase(modalityStanding)
         }
         return nil
     }
